@@ -54,11 +54,24 @@ export const CoinFlip = ({ connectedWallet, walletProviders }: CoinFlipProps) =>
       // Verify contract exists and setup
       (async () => {
         try {
+          // Log network information
+          const network = await browserProvider.getNetwork();
+          console.log("🌐 Connected to network:", {
+            chainId: network.chainId.toString(),
+            name: network.name,
+          });
+          
           const code = await browserProvider.getCode(CONTRACT_ADDRESS);
           if (code === "0x" || code === "0x0") {
             console.error("❌ CoinFlip contract not found at:", CONTRACT_ADDRESS);
-            setNetworkError("Contract not deployed at this address. Check your network and contract address.");
+            console.error("❌ You might be on the wrong network. Current chain ID:", network.chainId.toString());
+            setNetworkError(`Contract not found. Please connect to the correct network (Chain ID: ${network.chainId.toString()})`);
             setContractExists(false);
+            toast({
+              variant: "destructive",
+              title: "Wrong Network",
+              description: `Contract not found. Please check you're on the correct network.`,
+            });
             return;
           }
           console.log("✅ CoinFlip contract exists at:", CONTRACT_ADDRESS);
