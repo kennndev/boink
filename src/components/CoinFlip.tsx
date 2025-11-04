@@ -51,77 +51,100 @@ export const CoinFlip = ({ connectedWallet, walletProviders }: CoinFlipProps) =>
       const browserProvider = new ethers.BrowserProvider(ethereumProvider);
       setProvider(browserProvider);
 
-      // Verify contract exists
+      // Verify contract exists and setup
       (async () => {
         try {
           const code = await browserProvider.getCode(CONTRACT_ADDRESS);
           if (code === "0x" || code === "0x0") {
+            console.error("❌ CoinFlip contract not found at:", CONTRACT_ADDRESS);
             setNetworkError("Contract not deployed at this address. Check your network and contract address.");
             setContractExists(false);
-       
             return;
           }
+          console.log("✅ CoinFlip contract exists at:", CONTRACT_ADDRESS);
           setContractExists(true);
           setNetworkError(null);
-        } catch (e) {
-          setNetworkError("Failed to connect to contract");
-          setContractExists(false);
-          return;
-        }
-      })();
-      
-      const coinFlipContract = new ethers.Contract(
-        CONTRACT_ADDRESS,
-        coinFlipABI,
-        browserProvider
-      );
-      setContract(coinFlipContract);
-      
-      // Setup USDC contract (minimal ERC20 ABI)
-      try {
-        if (isUsdcConfigured) {
+          
+          // Create contract instance
+          const coinFlipContract = new ethers.Contract(
+            CONTRACT_ADDRESS,
+            coinFlipABI,
+            browserProvider
+          );
+          setContract(coinFlipContract);
+          
+          // Get USDC address from the contract's token() function
+          let usdcAddress = USDC_ADDRESS;
+          try {
+            const tokenAddr = await coinFlipContract.token();
+            console.log("✅ USDC address from contract:", tokenAddr);
+            usdcAddress = tokenAddr;
+          } catch (e) {
+            console.warn("⚠️ Could not get token address from contract, using env var");
+          }
+          
+          // Verify USDC contract exists
+          const usdcCode = await browserProvider.getCode(usdcAddress);
+          if (usdcCode === "0x" || usdcCode === "0x0") {
+            console.error("❌ USDC contract not found at:", usdcAddress);
+            toast({
+              variant: "destructive",
+              title: "USDC Contract Error",
+              description: `USDC not found at ${usdcAddress}. Check your network.`,
+            });
+            return;
+          }
+          console.log("✅ USDC contract exists at:", usdcAddress);
+          
+          // Setup USDC contract
           const erc20Abi = [
             "function approve(address spender, uint256 value) external returns (bool)",
             "function allowance(address owner, address spender) external view returns (uint256)",
             "function balanceOf(address account) external view returns (uint256)",
             "function decimals() external view returns (uint8)"
           ];
-          const usdc = new ethers.Contract(USDC_ADDRESS, erc20Abi, browserProvider);
+          const usdc = new ethers.Contract(usdcAddress, erc20Abi, browserProvider);
           setUsdcContract(usdc);
-        }
-      } catch (e) {
-        console.error("Failed to init USDC contract", e);
-      }
+          
+          // Load user stats
+          loadUserStats(coinFlipContract);
+          
+          // Detect contract capabilities
+          try {
+            let amountFlipDetected = false;
+            try {
+              coinFlipContract.interface.getFunction("flip(uint8,uint256,uint256)");
+              amountFlipDetected = true;
+            } catch {}
+            setHasAmountFlip(amountFlipDetected);
+            console.log("✅ hasAmountFlip:", amountFlipDetected);
 
-      // Load user stats
-      loadUserStats(coinFlipContract);
+            let quoteDetected = false;
+            try {
+              coinFlipContract.interface.getFunction("quotePayout(uint256)");
+              quoteDetected = true;
+            } catch {}
+            setHasQuotePayout(quoteDetected);
+            console.log("✅ hasQuotePayout:", quoteDetected);
+          } catch (e) {
+            console.warn("⚠️ Capability detect error", e);
+          }
 
-      // Detect contract capabilities
-      try {
-        let amountFlipDetected = false;
-        try {
-          coinFlipContract.interface.getFunction("flip(uint8,uint256,uint256)");
-          amountFlipDetected = true;
-        } catch {}
-        setHasAmountFlip(amountFlipDetected);
-
-        let quoteDetected = false;
-        try {
-          coinFlipContract.interface.getFunction("quotePayout(uint256)");
-          quoteDetected = true;
-        } catch {}
-        setHasQuotePayout(quoteDetected);
-      } catch (e) {
-        console.warn("Capability detect error", e);
-      }
-
-      // Fetch max bet if available (async)
-      (async () => {
-        try {
-          const mb = await coinFlipContract.maxBet();
-          setMaxBetUnits(mb);
-        } catch {
-          setMaxBetUnits(null);
+          // Fetch max bet if available
+          try {
+            const mb = await coinFlipContract.maxBet();
+            setMaxBetUnits(mb);
+            console.log("✅ maxBet:", mb.toString());
+          } catch {
+            setMaxBetUnits(null);
+            console.warn("⚠️ Could not fetch maxBet");
+          }
+          
+        } catch (e) {
+          console.error("❌ Setup error:", e);
+          setNetworkError("Failed to connect to contract");
+          setContractExists(false);
+          return;
         }
       })();
     } else if (connectedWallet && !isContractConfigured) {
