@@ -2,31 +2,18 @@
 	{
 		"inputs": [
 			{
-				"internalType": "enum CoinFlipGasOnly.Side",
-				"name": "guess",
-				"type": "uint8"
+				"internalType": "address",
+				"name": "_token",
+				"type": "address"
 			},
 			{
-				"internalType": "uint256",
-				"name": "userSeed",
-				"type": "uint256"
-			}
-		],
-		"name": "flip",
-		"outputs": [
-			{
-				"internalType": "bool",
-				"name": "won",
-				"type": "bool"
-			},
-			{
-				"internalType": "enum CoinFlipGasOnly.Side",
-				"name": "outcome",
-				"type": "uint8"
+				"internalType": "address",
+				"name": "_treasury",
+				"type": "address"
 			}
 		],
 		"stateMutability": "nonpayable",
-		"type": "function"
+		"type": "constructor"
 	},
 	{
 		"anonymous": false,
@@ -39,13 +26,13 @@
 			},
 			{
 				"indexed": false,
-				"internalType": "enum CoinFlipGasOnly.Side",
+				"internalType": "enum CoinFlipUSDC.Side",
 				"name": "guess",
 				"type": "uint8"
 			},
 			{
 				"indexed": false,
-				"internalType": "enum CoinFlipGasOnly.Side",
+				"internalType": "enum CoinFlipUSDC.Side",
 				"name": "outcome",
 				"type": "uint8"
 			},
@@ -58,7 +45,19 @@
 			{
 				"indexed": false,
 				"internalType": "uint256",
-				"name": "playIndex",
+				"name": "amountIn",
+				"type": "uint256"
+			},
+			{
+				"indexed": false,
+				"internalType": "uint256",
+				"name": "payoutTotal",
+				"type": "uint256"
+			},
+			{
+				"indexed": false,
+				"internalType": "uint256",
+				"name": "profitPlayer",
 				"type": "uint256"
 			}
 		],
@@ -66,19 +65,133 @@
 		"type": "event"
 	},
 	{
-		"inputs": [
-			{
-				"internalType": "bytes32",
-				"name": "x",
-				"type": "bytes32"
-			}
-		],
-		"name": "_bitToSide",
+		"inputs": [],
+		"name": "MAX_BET",
 		"outputs": [
 			{
-				"internalType": "enum CoinFlipGasOnly.Side",
+				"internalType": "uint256",
+				"name": "",
+				"type": "uint256"
+			}
+		],
+		"stateMutability": "view",
+		"type": "function"
+	},
+	{
+		"inputs": [],
+		"name": "PAYOUT_DEN",
+		"outputs": [
+			{
+				"internalType": "uint256",
+				"name": "",
+				"type": "uint256"
+			}
+		],
+		"stateMutability": "view",
+		"type": "function"
+	},
+	{
+		"inputs": [],
+		"name": "PAYOUT_NUM",
+		"outputs": [
+			{
+				"internalType": "uint256",
+				"name": "",
+				"type": "uint256"
+			}
+		],
+		"stateMutability": "view",
+		"type": "function"
+	},
+	{
+		"inputs": [],
+		"name": "decimals_",
+		"outputs": [
+			{
+				"internalType": "uint8",
 				"name": "",
 				"type": "uint8"
+			}
+		],
+		"stateMutability": "view",
+		"type": "function"
+	},
+	{
+		"inputs": [
+			{
+				"internalType": "uint256",
+				"name": "amount",
+				"type": "uint256"
+			}
+		],
+		"name": "deposit",
+		"outputs": [],
+		"stateMutability": "nonpayable",
+		"type": "function"
+	},
+	{
+		"inputs": [
+			{
+				"internalType": "enum CoinFlipUSDC.Side",
+				"name": "guess",
+				"type": "uint8"
+			},
+			{
+				"internalType": "uint256",
+				"name": "amount",
+				"type": "uint256"
+			},
+			{
+				"internalType": "uint256",
+				"name": "userSeed",
+				"type": "uint256"
+			}
+		],
+		"name": "flip",
+		"outputs": [],
+		"stateMutability": "nonpayable",
+		"type": "function"
+	},
+	{
+		"inputs": [],
+		"name": "maxBet",
+		"outputs": [
+			{
+				"internalType": "uint256",
+				"name": "",
+				"type": "uint256"
+			}
+		],
+		"stateMutability": "view",
+		"type": "function"
+	},
+	{
+		"inputs": [],
+		"name": "owner",
+		"outputs": [
+			{
+				"internalType": "address",
+				"name": "",
+				"type": "address"
+			}
+		],
+		"stateMutability": "view",
+		"type": "function"
+	},
+	{
+		"inputs": [
+			{
+				"internalType": "uint256",
+				"name": "amount",
+				"type": "uint256"
+			}
+		],
+		"name": "quotePayout",
+		"outputs": [
+			{
+				"internalType": "uint256",
+				"name": "",
+				"type": "uint256"
 			}
 		],
 		"stateMutability": "pure",
@@ -86,20 +199,22 @@
 	},
 	{
 		"inputs": [],
-		"name": "myStats",
-		"outputs": [
+		"name": "renounceOwnership",
+		"outputs": [],
+		"stateMutability": "nonpayable",
+		"type": "function"
+	},
+	{
+		"inputs": [
 			{
-				"internalType": "uint256",
-				"name": "plays",
-				"type": "uint256"
-			},
-			{
-				"internalType": "uint256",
-				"name": "wins",
-				"type": "uint256"
+				"internalType": "address",
+				"name": "_treasury",
+				"type": "address"
 			}
 		],
-		"stateMutability": "view",
+		"name": "setTreasury",
+		"outputs": [],
+		"stateMutability": "nonpayable",
 		"type": "function"
 	},
 	{
@@ -121,9 +236,71 @@
 				"internalType": "uint256",
 				"name": "wins",
 				"type": "uint256"
+			},
+			{
+				"internalType": "uint256",
+				"name": "wagered",
+				"type": "uint256"
+			},
+			{
+				"internalType": "uint256",
+				"name": "paidOut",
+				"type": "uint256"
 			}
 		],
 		"stateMutability": "view",
+		"type": "function"
+	},
+	{
+		"inputs": [],
+		"name": "token",
+		"outputs": [
+			{
+				"internalType": "contract IERC20",
+				"name": "",
+				"type": "address"
+			}
+		],
+		"stateMutability": "view",
+		"type": "function"
+	},
+	{
+		"inputs": [
+			{
+				"internalType": "address",
+				"name": "newOwner",
+				"type": "address"
+			}
+		],
+		"name": "transferOwnership",
+		"outputs": [],
+		"stateMutability": "nonpayable",
+		"type": "function"
+	},
+	{
+		"inputs": [],
+		"name": "treasury",
+		"outputs": [
+			{
+				"internalType": "address",
+				"name": "",
+				"type": "address"
+			}
+		],
+		"stateMutability": "view",
+		"type": "function"
+	},
+	{
+		"inputs": [
+			{
+				"internalType": "uint256",
+				"name": "amount",
+				"type": "uint256"
+			}
+		],
+		"name": "withdraw",
+		"outputs": [],
+		"stateMutability": "nonpayable",
 		"type": "function"
 	}
 ]
