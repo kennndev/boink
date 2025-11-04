@@ -313,25 +313,28 @@ export const CoinFlip = ({ connectedWallet, walletProviders }: CoinFlipProps) =>
       const receipt = await tx.wait();
       console.log("✅ Approval confirmed:", receipt.hash);
       
-      // Wait for blockchain state to update
+      // Wait for blockchain state to update by polling allowance
       console.log("⏳ Waiting for approval to propagate...");
       toast({
         title: "Processing Approval...",
-        description: "Waiting for blockchain confirmation",
+        description: "Confirming USDC allowance on-chain",
       });
       
-      // Wait 2 seconds for state to update across nodes
-      await new Promise(resolve => setTimeout(resolve, 2000));
-      
-      // Verify the approval went through
-      const newAllowance = await (erc20 as any).allowance(owner, CONTRACT_ADDRESS);
-      console.log("✅ New allowance:", newAllowance.toString());
+      let newAllowance = await (erc20 as any).allowance(owner, CONTRACT_ADDRESS);
+      let attempts = 0;
+      while (newAllowance < needed && attempts < 12) { // up to ~12s
+        await new Promise(resolve => setTimeout(resolve, 1000));
+        newAllowance = await (erc20 as any).allowance(owner, CONTRACT_ADDRESS);
+        console.log(`⏱️ Allowance check #${attempts + 1}:`, newAllowance.toString());
+        attempts += 1;
+      }
+      console.log("✅ Final allowance after polling:", newAllowance.toString());
       
       if (newAllowance < needed) {
-        console.error("❌ Allowance still insufficient after approval!");
+        console.error("❌ Allowance still insufficient after approval polling!");
         console.error("   Expected at least:", needed.toString());
         console.error("   Got:", newAllowance.toString());
-        throw new Error("Approval transaction succeeded but allowance not updated. Try again.");
+        throw new Error("Approval succeeded but not yet visible. Please try again in a few seconds.");
       }
       
       toast({
