@@ -40,6 +40,7 @@ export const CoinFlip = ({ connectedWallet, walletProviders }: CoinFlipProps) =>
   // Contract addresses
   const CONTRACT_ADDRESS = import.meta.env.VITE_COINFLIP_CONTRACT_ADDRESS || "0x952BAC90dfAb86006AC13B251057E208ceb3A9A3";
   const USDC_ADDRESS = import.meta.env.VITE_USDC_CONTRACT_ADDRESS || "0x036CbD53842c5426634e7929541eC2318f3dCF7e";
+  const EXPECTED_CHAIN_ID = import.meta.env.VITE_CHAIN_ID || "84532"; // Base Sepolia by default
   
   // Check if contract address is properly configured
   const isContractConfigured = CONTRACT_ADDRESS && CONTRACT_ADDRESS !== "0x0000000000000000000000000000000000000000";
@@ -56,21 +57,62 @@ export const CoinFlip = ({ connectedWallet, walletProviders }: CoinFlipProps) =>
         try {
           // Log network information
           const network = await browserProvider.getNetwork();
+          const currentChainId = network.chainId.toString();
           console.log("🌐 Connected to network:", {
-            chainId: network.chainId.toString(),
+            chainId: currentChainId,
             name: network.name,
           });
+          
+          // Check if on correct network
+          if (currentChainId !== EXPECTED_CHAIN_ID) {
+            console.error("❌ Wrong network! Expected:", EXPECTED_CHAIN_ID, "Got:", currentChainId);
+            const networkNames: Record<string, string> = {
+              "84532": "Base Sepolia",
+              "8453": "Base Mainnet",
+              "1": "Ethereum Mainnet",
+              "11155111": "Sepolia",
+            };
+            const expectedName = networkNames[EXPECTED_CHAIN_ID] || `Chain ${EXPECTED_CHAIN_ID}`;
+            const currentName = networkNames[currentChainId] || `Chain ${currentChainId}`;
+            
+            setNetworkError(`Wrong network. Please switch to ${expectedName}`);
+            setContractExists(false);
+            
+            toast({
+              variant: "destructive",
+              title: "Wrong Network",
+              description: `Please switch from ${currentName} to ${expectedName} in your wallet.`,
+              action: (
+                <button
+                  onClick={async () => {
+                    try {
+                      await ethereumProvider.request({
+                        method: 'wallet_switchEthereumChain',
+                        params: [{ chainId: `0x${parseInt(EXPECTED_CHAIN_ID).toString(16)}` }],
+                      });
+                    } catch (error: any) {
+                      console.error("Failed to switch network:", error);
+                    }
+                  }}
+                  className="px-3 py-1 bg-white text-black rounded hover:bg-gray-200"
+                >
+                  Switch
+                </button>
+              ),
+            });
+            return;
+          }
           
           const code = await browserProvider.getCode(CONTRACT_ADDRESS);
           if (code === "0x" || code === "0x0") {
             console.error("❌ CoinFlip contract not found at:", CONTRACT_ADDRESS);
-            console.error("❌ You might be on the wrong network. Current chain ID:", network.chainId.toString());
-            setNetworkError(`Contract not found. Please connect to the correct network (Chain ID: ${network.chainId.toString()})`);
+            console.error("❌ You might be on the wrong network. Current chain ID:", currentChainId);
+            setNetworkError(`Contract not found at ${CONTRACT_ADDRESS}`);
             setContractExists(false);
             toast({
               variant: "destructive",
-              title: "Wrong Network",
-              description: `Contract not found. Please check you're on the correct network.`,
+              title: "Contract Not Found",
+              description: `Contract not found. Please check configuration.`,
             });
             return;
           }
@@ -458,6 +500,19 @@ export const CoinFlip = ({ connectedWallet, walletProviders }: CoinFlipProps) =>
           Choose heads or tails and flip the coin!
         </p>
       </div>
+
+      {/* Network Error Warning */}
+      {networkError && (
+        <div className="win98-border bg-red-100 p-3 border-red-500">
+          <div className="flex items-center gap-2">
+            <span className="text-2xl">⚠️</span>
+            <div className="flex-1">
+              <p className="font-pixel text-red-700 text-sm font-bold">Network Issue</p>
+              <p className="font-retro text-red-600 text-xs">{networkError}</p>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* User Stats */}
       <div className="win98-border-inset p-4 bg-secondary">
