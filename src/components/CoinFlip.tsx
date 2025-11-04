@@ -288,29 +288,68 @@ export const CoinFlip = ({ connectedWallet, walletProviders }: CoinFlipProps) =>
     const owner = await signer.getAddress();
     const current = await (erc20 as any).allowance(owner, CONTRACT_ADDRESS);
     
+    console.log("💰 Checking allowance:");
+    console.log("  - Current allowance:", current.toString());
+    console.log("  - Needed:", needed.toString());
+    console.log("  - Owner:", owner);
+    console.log("  - Spender (CoinFlip):", CONTRACT_ADDRESS);
+    
     if (current >= needed) {
+      console.log("✅ Sufficient allowance already exists");
       return true;
     }
     
+    console.log("⚠️ Insufficient allowance, requesting approval...");
     toast({
       title: "Approval Required",
       description: "Please approve USDC spending in MetaMask",
     });
     
     try {
-      const tx = await (erc20.connect(signer) as any).approve(CONTRACT_ADDRESS, needed);
+      // Approve a large amount (e.g., max uint256 or 1000 USDC) to avoid multiple approvals
+      const approvalAmount = ethers.parseUnits("1000", usdcDecimals); // 1000 USDC
+      console.log("📝 Requesting approval for:", approvalAmount.toString());
+      
+      const tx = await (erc20.connect(signer) as any).approve(CONTRACT_ADDRESS, approvalAmount);
+      console.log("⏳ Approval transaction sent:", tx.hash);
 
-      await tx.wait();
+      const receipt = await tx.wait();
+      console.log("✅ Approval confirmed:", receipt.hash);
+      
+      // Verify the approval went through
+      const newAllowance = await (erc20 as any).allowance(owner, CONTRACT_ADDRESS);
+      console.log("✅ New allowance:", newAllowance.toString());
+      
+      toast({
+        title: "Approval Successful",
+        description: "You can now flip the coin!",
+      });
  
     } catch (e: any) {
+      console.error("❌ Approval error:", e);
       // Some ERC20s (incl. USDC) require setting allowance to 0 before updating
       try {
+        console.log("🔄 Trying reset to 0 first...");
         const tx0 = await (erc20.connect(signer) as any).approve(CONTRACT_ADDRESS, 0);
         await tx0.wait();
-        const tx1 = await (erc20.connect(signer) as any).approve(CONTRACT_ADDRESS, needed);
+        console.log("✅ Reset to 0 complete");
+        
+        const approvalAmount = ethers.parseUnits("1000", usdcDecimals);
+        const tx1 = await (erc20.connect(signer) as any).approve(CONTRACT_ADDRESS, approvalAmount);
         await tx1.wait();
+        console.log("✅ Approval complete after reset");
+        
+        toast({
+          title: "Approval Successful",
+          description: "You can now flip the coin!",
+        });
       } catch (inner) {
-        console.error("Approval failed:", e);
+        console.error("❌ Approval failed even after reset:", inner);
+        toast({
+          variant: "destructive",
+          title: "Approval Failed",
+          description: "Could not approve USDC spending. Please try again.",
+        });
         throw e;
       }
     }
@@ -374,8 +413,15 @@ export const CoinFlip = ({ connectedWallet, walletProviders }: CoinFlipProps) =>
         // Ensure user balance
         const owner = await signer.getAddress();
         const bal = await (usdcContract as any).balanceOf(owner);
+        console.log("💵 User USDC balance:", ethers.formatUnits(bal, usdcDecimals));
         
         if (bal < amountUnits) {
+          console.error("❌ Insufficient USDC balance");
+          toast({
+            variant: "destructive",
+            title: "Insufficient Balance",
+            description: `You need ${ethers.formatUnits(amountUnits, usdcDecimals)} USDC`,
+          });
           setIsFlipping(false);
           setShowAnimation(false);
           return;
@@ -384,15 +430,39 @@ export const CoinFlip = ({ connectedWallet, walletProviders }: CoinFlipProps) =>
         // Check contract liquidity
         const contractBal = await (usdcContract as any).balanceOf(CONTRACT_ADDRESS);
         const requiredPayout = (amountUnits * 195n) / 100n;
+        console.log("🏦 Contract USDC balance:", ethers.formatUnits(contractBal, usdcDecimals));
+        console.log("💰 Required payout:", ethers.formatUnits(requiredPayout, usdcDecimals));
         
         if (contractBal < requiredPayout) {
-
+          console.error("❌ Insufficient contract liquidity");
+          toast({
+            variant: "destructive",
+            title: "Insufficient Liquidity",
+            description: "Contract doesn't have enough USDC to pay winners",
+          });
           setIsFlipping(false);
           setShowAnimation(false);
           return;
         }
+        
         // Ensure allowance
-        await ensureAllowance(amountUnits, provider, usdcContract!);
+        console.log("🔐 Ensuring USDC allowance...");
+        try {
+          await ensureAllowance(amountUnits, provider, usdcContract!);
+          console.log("✅ Allowance ensured, proceeding with flip");
+        } catch (approvalError: any) {
+          console.error("❌ Approval failed or was rejected:", approvalError);
+          setIsFlipping(false);
+          setShowAnimation(false);
+          if (approvalError.code === "ACTION_REJECTED") {
+            toast({
+              variant: "destructive",
+              title: "Approval Rejected",
+              description: "You must approve USDC spending to play",
+            });
+          }
+          return;
+        }
       }
     
       
