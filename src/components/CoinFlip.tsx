@@ -240,18 +240,31 @@ export const CoinFlip = ({ connectedWallet, walletProviders }: CoinFlipProps) =>
   };
 
   const handleFlip = async () => {
+    console.log("=== FLIP BUTTON CLICKED ===");
+    console.log("isContractConfigured:", isContractConfigured);
+    console.log("contract:", contract);
+    console.log("provider:", provider);
+    console.log("selectedSide:", selectedSide);
+    console.log("hasAmountFlip:", hasAmountFlip);
+    console.log("contractExists:", contractExists);
+    
     if (!isContractConfigured) {
+      console.log("❌ Early return: contract not configured");
       return;
     }
     
     if (!contract || !provider || !selectedSide) {
+      console.log("❌ Early return: missing contract/provider/side");
       return;
     }
 
     if (hasAmountFlip && (!isUsdcConfigured || !usdcContract)) {
+      console.log("❌ Early return: USDC not configured but required");
       return;
     }
 
+    console.log("✅ All checks passed, proceeding with flip");
+    
     // Capture the guess BEFORE any state changes
     const currentGuess = selectedSide;
 
@@ -306,13 +319,24 @@ export const CoinFlip = ({ connectedWallet, walletProviders }: CoinFlipProps) =>
     
       
       // Call appropriate signature
+      console.log("📤 Calling flip function...");
+      console.log("  - hasAmountFlip:", hasAmountFlip);
+      console.log("  - guess:", guess);
+      console.log("  - userSeed:", userSeed);
+      if (hasAmountFlip) {
+        console.log("  - amountUnits:", amountUnits);
+      }
+      
       const tx = hasAmountFlip
         ? await (contractWithSigner as any).flip(guess, amountUnits, userSeed)
         : await (contractWithSigner as any).flip(guess, userSeed);
       
+      console.log("✅ Transaction sent:", tx.hash);
  
       // Wait for transaction to be mined
+      console.log("⏳ Waiting for transaction to be mined...");
       const receipt = await tx.wait();
+      console.log("✅ Transaction mined:", receipt);
       
       // Find the FlipResult event
       const event = receipt.logs.find((log: any) => {
@@ -359,6 +383,9 @@ export const CoinFlip = ({ connectedWallet, walletProviders }: CoinFlipProps) =>
       }
       
     } catch (error: any) {
+      console.error("❌ FLIP ERROR:", error);
+      console.error("Error code:", error.code);
+      console.error("Error message:", error.message);
       
       let errorMessage = "Transaction failed";
       if (error.code === "ACTION_REJECTED") {
@@ -366,6 +393,12 @@ export const CoinFlip = ({ connectedWallet, walletProviders }: CoinFlipProps) =>
       } else if (error.message) {
         errorMessage = error.message;
       }
+      
+      toast({
+        variant: "destructive",
+        title: "Flip Failed",
+        description: errorMessage,
+      });
 
     } finally {
       setIsFlipping(false);
