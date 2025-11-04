@@ -1,0 +1,129 @@
+[
+	{
+		"inputs": [
+			{
+				"internalType": "enum CoinFlipGasOnly.Side",
+				"name": "guess",
+				"type": "uint8"
+			},
+			{
+				"internalType": "uint256",
+				"name": "userSeed",
+				"type": "uint256"
+			}
+		],
+		"name": "flip",
+		"outputs": [
+			{
+				"internalType": "bool",
+				"name": "won",
+				"type": "bool"
+			},
+			{
+				"internalType": "enum CoinFlipGasOnly.Side",
+				"name": "outcome",
+				"type": "uint8"
+			}
+		],
+		"stateMutability": "nonpayable",
+		"type": "function"
+	},
+	{
+		"anonymous": false,
+		"inputs": [
+			{
+				"indexed": true,
+				"internalType": "address",
+				"name": "player",
+				"type": "address"
+			},
+			{
+				"indexed": false,
+				"internalType": "enum CoinFlipGasOnly.Side",
+				"name": "guess",
+				"type": "uint8"
+			},
+			{
+				"indexed": false,
+				"internalType": "enum CoinFlipGasOnly.Side",
+				"name": "outcome",
+				"type": "uint8"
+			},
+			{
+				"indexed": false,
+				"internalType": "bool",
+				"name": "won",
+				"type": "bool"
+			},
+			{
+				"indexed": false,
+				"internalType": "uint256",
+				"name": "playIndex",
+				"type": "uint256"
+			}
+		],
+		"name": "FlipResult",
+		"type": "event"
+	},
+	{
+		"inputs": [
+			{
+				"internalType": "bytes32",
+				"name": "x",
+				"type": "bytes32"
+			}
+		],
+		"name": "_bitToSide",
+		"outputs": [
+			{
+				"internalType": "enum CoinFlipGasOnly.Side",
+				"name": "",
+				"type": "uint8"
+			}
+		],
+		"stateMutability": "pure",
+		"type": "function"
+	},
+	{
+		"inputs": [],
+		"name": "myStats",
+		"outputs": [
+			{
+				"internalType": "uint256",
+				"name": "plays",
+				"type": "uint256"
+			},
+			{
+				"internalType": "uint256",
+				"name": "wins",
+				"type": "uint256"
+			}
+		],
+		"stateMutability": "view",
+		"type": "function"
+	},
+	{
+		"inputs": [
+			{
+				"internalType": "address",
+				"name": "",
+				"type": "address"
+			}
+		],
+		"name": "stats",
+		"outputs": [
+			{
+				"internalType": "uint256",
+				"name": "plays",
+				"type": "uint256"
+			},
+			{
+				"internalType": "uint256",
+				"name": "wins",
+				"type": "uint256"
+			}
+		],
+		"stateMutability": "view",
+		"type": "function"
+	}
+]
