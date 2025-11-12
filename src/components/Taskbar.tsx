@@ -98,6 +98,7 @@ export const Taskbar = ({ onStartClick, onConnectWalletClick, connectedWallet, b
             variant="secondary"
             size="sm"
             className="h-7 w-7 sm:h-8 sm:w-8 p-0 win98-border hover:win98-border-inset flex items-center justify-center shrink-0"
+            onClick={() => window.open('https://x.com/boinknfts', '_blank')}
           >
             <img src={xIcon} alt="X" className="w-3 h-3 sm:w-4 sm:h-4" />
           </Button>
@@ -121,10 +122,9 @@ export const Taskbar = ({ onStartClick, onConnectWalletClick, connectedWallet, b
           </Button>
         </div>
 
-        {/* Block Number */}
+         {/* Current Time */}
         <div className="h-8 sm:h-9 px-2 sm:px-3 win98-border-inset flex items-center gap-1 sm:gap-2 shrink-0">
-          <div className="w-2 h-2 sm:w-3 sm:h-3 bg-green-500 rounded-full"></div>
-          <span className="text-xs font-pixel">{blockNumber}</span>
+          <span className="text-xs font-pixel">{currentTime.toLocaleTimeString()}</span>
         </div>
       </div>
 
@@ -202,13 +202,7 @@ export const Taskbar = ({ onStartClick, onConnectWalletClick, connectedWallet, b
               </div>
             </div>
 
-            {/* Block Number */}
-            <div className="h-6 px-2 win98-border-inset flex items-center gap-1 text-black">
-              <div className="w-2 h-2 bg-green-500 rounded-full"></div>
-              <span className="text-xs font-pixel">{blockNumber}</span>
-            </div>
-
-            {/* Current Time */}
+                  {/* Current Time */}
             <div className="h-6 px-2 win98-border-inset flex items-center gap-1 text-black">
               <span className="text-xs font-pixel">{currentTime.toLocaleTimeString()}</span>
             </div>
