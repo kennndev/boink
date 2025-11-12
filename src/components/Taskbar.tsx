@@ -124,7 +124,7 @@ export const Taskbar = ({ onStartClick, onConnectWalletClick, connectedWallet, b
 
          {/* Current Time */}
         <div className="h-8 sm:h-9 px-2 sm:px-3 win98-border-inset flex items-center gap-1 sm:gap-2 shrink-0">
-          <span className="text-xs font-pixel">{currentTime.toLocaleTimeString()}</span>
+          <span className="text-xs font-pixel text-gray-600">{currentTime.toLocaleTimeString()}</span>
         </div>
       </div>
 
@@ -204,7 +204,7 @@ export const Taskbar = ({ onStartClick, onConnectWalletClick, connectedWallet, b
 
                   {/* Current Time */}
             <div className="h-6 px-2 win98-border-inset flex items-center gap-1 text-black">
-              <span className="text-xs font-pixel">{currentTime.toLocaleTimeString()}</span>
+              <span className="text-xs font-pixel text-gray-600">{currentTime.toLocaleTimeString()}</span>
             </div>
           </div>
         )}
