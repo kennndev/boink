@@ -15,7 +15,17 @@ interface TaskbarProps {
 
 export const Taskbar = ({ onStartClick, onConnectWalletClick, connectedWallet, blockNumber }: TaskbarProps) => {
   const [showMobileMenu, setShowMobileMenu] = useState(false);
+  const [currentTime, setCurrentTime] = useState(new Date());
   const menuRef = useRef<HTMLDivElement>(null);
+
+  // Update time every second
+  useEffect(() => {
+    const timer = setInterval(() => {
+      setCurrentTime(new Date());
+    }, 1000);
+
+    return () => clearInterval(timer);
+  }, []);
 
   // Close menu when clicking outside
   useEffect(() => {
@@ -159,7 +169,7 @@ export const Taskbar = ({ onStartClick, onConnectWalletClick, connectedWallet, b
                   size="sm"
                   className="h-6 w-6 p-0 win98-border hover:win98-border-inset flex items-center justify-center"
                   onClick={() => {
-                    window.open('https://twitter.com', '_blank');
+                    window.open('https://x.com/boinknfts', '_blank');
                     setShowMobileMenu(false);
                   }}
                 >
@@ -196,6 +206,11 @@ export const Taskbar = ({ onStartClick, onConnectWalletClick, connectedWallet, b
             <div className="h-6 px-2 win98-border-inset flex items-center gap-1 text-black">
               <div className="w-2 h-2 bg-green-500 rounded-full"></div>
               <span className="text-xs font-pixel">{blockNumber}</span>
+            </div>
+
+            {/* Current Time */}
+            <div className="h-6 px-2 win98-border-inset flex items-center gap-1 text-black">
+              <span className="text-xs font-pixel">{currentTime.toLocaleTimeString()}</span>
             </div>
           </div>
         )}
