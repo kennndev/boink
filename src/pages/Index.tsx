@@ -16,13 +16,17 @@ import WallpaperImage from "@/assets/photos-album/wallpaper.png";
 import gambleShitImage from "@/assets/gamble-shit.png";
 import infoIcon from "@/assets/site-icon/Info.png";
 import { useToast } from "@/hooks/use-toast";
+import { Toaster } from "@/components/ui/toaster";
 import type { EthereumProvider } from "@/types/wallet";
 import { CoinFlip } from "@/components/CoinFlip";
+import { Leaderboard } from "@/components/Leaderboard";
+import { WalletConnectModal } from "@/components/WalletConnectModal";
 
 const Index = () => {
   const [openWindow, setOpenWindow] = useState<string | null>(null);
   const [showAbout, setShowAbout] = useState(false);
   const [showWalletModal, setShowWalletModal] = useState(false);
+  const [showWalletConnectModal, setShowWalletConnectModal] = useState(false);
   const [connectedWallet, setConnectedWallet] = useState<string | null>(null);
   const [blockNumber, setBlockNumber] = useState("29182283");
   const [detectedWallets, setDetectedWallets] = useState<string[]>([]);
@@ -159,12 +163,55 @@ const Index = () => {
       
       let accounts: string[] = [];
 
+      // Check if on mobile and no wallet detected
+      const isMobile = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent);
+      
       if (walletName === "WalletConnect") {
-        toast({
-          title: "WalletConnect Not Implemented",
-          description: "WalletConnect integration is coming soon!",
-          variant: "destructive",
-        });
+        try {
+          const chainId = Number(import.meta.env.VITE_CHAIN_ID || "84532");
+          const projectId = "97bac2ccf2dc1d7c79854d5bc2686912";
+          const rpcMap: Record<number, string> = {
+            763373: "https://rpc-gel-sepolia.inkonchain.com",
+            8453: "https://mainnet.base.org",
+          };
+
+          const { EthereumProvider } = await import("@walletconnect/ethereum-provider");
+
+          const wcProvider = await EthereumProvider.init({
+            projectId,
+            showQrModal: true,
+            chains: [chainId],
+            optionalChains: [chainId],
+            methods: [
+              "eth_sendTransaction",
+              "eth_signTransaction",
+              "eth_sign",
+              "personal_sign",
+              "eth_signTypedData"
+            ],
+            events: ["chainChanged", "accountsChanged"],
+            rpcMap,
+          });
+
+          // Trigger QR modal and connect
+          const wcAccounts = await wcProvider.enable();
+          console.log("WalletConnect accounts:", wcAccounts);
+
+          setWalletProviders({ ...walletProviders, WalletConnect: wcProvider as unknown as EthereumProvider });
+          setConnectedWallet("WalletConnect");
+          setShowWalletModal(false);
+          toast({
+            title: "Wallet Connected",
+            description: "Connected via WalletConnect",
+          });
+        } catch (wcError: any) {
+          console.error("WalletConnect error:", wcError);
+          toast({
+            variant: "destructive",
+            title: "WalletConnect Failed",
+            description: wcError?.message || "Could not establish WalletConnect session",
+          });
+        }
         return;
       }
 
@@ -174,7 +221,26 @@ const Index = () => {
         (window as any).ethereum;
 
       if (!provider || typeof provider.request !== "function") {
-        throw new Error(`${walletName} provider not detected. Please install or enable the extension.`);
+        if (isMobile) {
+          // On mobile, guide user to open in wallet browser
+          const walletLinks: Record<string, string> = {
+            "MetaMask": "https://metamask.app.link/dapp/" + window.location.href.replace(/^https?:\/\//, ''),
+            "Coinbase Wallet": "https://go.cb-w.com/dapp?cb_url=" + encodeURIComponent(window.location.href),
+            "Trust Wallet": "https://link.trustwallet.com/open_url?coin_id=60&url=" + encodeURIComponent(window.location.href),
+          };
+          
+          const deepLink = walletLinks[walletName];
+          if (deepLink) {
+            toast({
+              title: `Open in ${walletName}`,
+              description: `Opening ${walletName} app...`,
+            });
+            window.location.href = deepLink;
+            return;
+          }
+        }
+        
+        throw new Error(`${walletName} not detected. ${isMobile ? 'Please open this page in your wallet browser or install ' + walletName : 'Please install the browser extension.'}`);
       }
 
       accounts = await provider.request({
@@ -240,6 +306,7 @@ const Index = () => {
     { icon: TrashBinIcon, label: "Trash", id: "trash" },
     { icon: Winamp, label: "Music Player", id: "winamp" },
     { icon: infoIcon, label: "Info", id: "info" },
+    { icon: infoIcon, label: "Onchain Leaderboard", id: "leaderboard" },
     { icon: Coinflip, label: "COINFLIP", id: "mint" },
     { icon: StakeIcon, label: "My Stake", id: "Stakes" },
     { icon: PhotosAlbum, label: "Photos Album", id: "dashboard" },
@@ -269,6 +336,34 @@ const Index = () => {
             <div className="win98-border-inset p-2 sm:p-4 min-h-[150px] sm:min-h-[200px]">
               <p className="text-xs sm:text-sm font-retro text-muted-foreground">Chat interface coming soon...</p>
             </div>
+          </div>
+        ),
+      },
+      leaderboard: {
+        title: "Onchain Leaderboard",
+        body: (
+          <div className="space-y-2 sm:space-y-4">
+            {connectedWallet ? (
+              <Leaderboard 
+                connectedWallet={connectedWallet} 
+                walletProviders={walletProviders} 
+              />
+            ) : (
+              <div className="text-center space-y-4">
+                <h2 className="text-lg sm:text-2xl font-bold font-military text-gradient-emerald">
+                  🏆 Onchain Leaderboard 🏆
+                </h2>
+                <p className="text-sm sm:text-base font-cyber text-gradient-red">
+                  Connect your wallet to view the leaderboard!
+                </p>
+                <div className="win98-border p-4 bg-secondary">
+                  <p className="text-center text-sm sm:text-lg font-pixel">Connect Wallet Required</p>
+                  <p className="text-center text-xs sm:text-sm mt-2 font-retro">
+                    Click the wallet icon in the taskbar to connect
+                  </p>
+                </div>
+              </div>
+            )}
           </div>
         ),
       },
@@ -654,6 +749,8 @@ const Index = () => {
   const renderWalletModal = () => {
     console.log('Rendering wallet modal with detected wallets:', detectedWallets);
     
+    const isMobile = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent);
+    
     const walletConfigs = [
       { name: 'MetaMask', icon: '🦊', color: 'bg-orange-500' },
       { name: 'Rabby Wallet', icon: 'R', color: 'bg-blue-400' },
@@ -666,8 +763,15 @@ const Index = () => {
       .filter(wallet => detectedWallets.includes(wallet.name))
       .map(wallet => ({ ...wallet, available: true }));
 
+    // On mobile, show MetaMask even if not detected (will use deep link)
+    const mobileWallets = isMobile && installedWallets.length === 0 ? [
+      { name: 'MetaMask', icon: '🦊', color: 'bg-orange-500', available: true },
+      { name: 'Coinbase Wallet', icon: 'C', color: 'bg-blue-600', available: true },
+      { name: 'Trust Wallet', icon: '💙', color: 'bg-blue-500', available: true },
+    ] : [];
+
     const recommendedWallets = [
-      { name: 'WalletConnect', available: false, icon: 'W', color: 'bg-blue-400' },
+      { name: 'WalletConnect', available: true, icon: 'W', color: 'bg-blue-400', description: 'Scan QR code' },
     ];
 
     return (
@@ -688,6 +792,15 @@ const Index = () => {
 
         {/* Modal Content */}
         <div className="flex-1 bg-gray-300 p-2 sm:p-4 overflow-y-auto min-h-0">
+          {/* Mobile Instructions */}
+          {isMobile && installedWallets.length === 0 && (
+            <div className="win98-border bg-yellow-100 p-3 mb-4">
+              <p className="text-xs font-retro text-gray-800">
+                📱 <strong>Mobile User?</strong> Click a wallet below to open this page in that wallet's browser.
+              </p>
+            </div>
+          )}
+          
           {/* Installed Section */}
             {installedWallets.length > 0 && (
           <div className="space-y-3">
@@ -711,6 +824,30 @@ const Index = () => {
                 </div>
               </div>
             )}
+          
+          {/* Mobile Wallets Section */}
+          {mobileWallets.length > 0 && (
+            <div className="space-y-3 mt-6">
+              <h3 className="text-blue-600 font-medium text-sm font-futuristic">
+                Open in Wallet App
+              </h3>
+              <div className="space-y-2">
+                {mobileWallets.map((wallet) => (
+                  <div 
+                    key={wallet.name}
+                    className="win98-border-inset p-3 flex items-center gap-3 hover:bg-gray-100 cursor-pointer"
+                    onClick={() => handleWalletConnect(wallet.name)}
+                  >
+                    <div className={`w-8 h-8 ${wallet.color} flex items-center justify-center win98-border`}>
+                      <span className="text-white text-xs font-bold">{wallet.icon}</span>
+                    </div>
+                    <span className="text-sm font-medium text-black font-cyber">{wallet.name}</span>
+                    <span className="ml-auto text-xs text-gray-600">→</span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
 
           {/* Recommended Section */}
           <div className="space-y-3 mt-6">
@@ -727,9 +864,17 @@ const Index = () => {
                     <div className={`w-8 h-8 ${wallet.color} flex items-center justify-center win98-border`}>
                       <span className="text-white text-xs font-bold">{wallet.icon}</span>
                 </div>
-                    <span className="text-sm font-medium text-black font-cyber">{wallet.name}</span>
+                    <div className="flex-1">
+                      <span className="text-sm font-medium text-black font-cyber">{wallet.name}</span>
+                      {(wallet as any).description && (
+                        <p className="text-xs text-gray-600 font-retro">{(wallet as any).description}</p>
+                      )}
+                    </div>
                     {!wallet.available && (
                       <span className="ml-auto text-xs text-gray-500 font-retro">Coming Soon</span>
+                    )}
+                    {wallet.available && wallet.name === 'WalletConnect' && (
+                      <span className="ml-auto text-xs text-blue-600 font-pixel">→</span>
                     )}
               </div>
                 ))}
@@ -830,6 +975,24 @@ const Index = () => {
       {/* Connect Wallet Modal */}
       {showWalletModal && renderWalletModal()}
 
+      {/* WalletConnect QR Modal */}
+      {showWalletConnectModal && (
+        <WalletConnectModal
+          projectId="97bac2ccf2dc1d7c79854d5bc2686912"
+          onClose={() => setShowWalletConnectModal(false)}
+          onConnect={(provider) => {
+            // Handle WalletConnect provider connection
+            setWalletProviders({ ...walletProviders, WalletConnect: provider });
+            setConnectedWallet("WalletConnect");
+            setShowWalletConnectModal(false);
+            toast({
+              title: "Wallet Connected",
+              description: "Successfully connected via WalletConnect",
+            });
+          }}
+        />
+      )}
+
       {/* Image Modal */}
       {showImageModal && (
         <div className="fixed inset-0 flex items-center justify-center z-50 p-2 sm:p-4 bg-black bg-opacity-75">
@@ -869,6 +1032,9 @@ const Index = () => {
         connectedWallet={connectedWallet}
         blockNumber={blockNumber}
       />
+      
+      {/* Toast notifications */}
+      <Toaster />
     </div>
   );
 };
