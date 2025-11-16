@@ -175,7 +175,9 @@ const Index = () => {
             8453: "https://mainnet.base.org",
           };
 
-          const { EthereumProvider } = await import("@walletconnect/ethereum-provider");
+          // Dynamic import with string to avoid build-time resolution issues
+          const walletConnectModule = await import(/* @vite-ignore */ "@walletconnect/ethereum-provider");
+          const { EthereumProvider } = walletConnectModule;
 
           const wcProvider = await EthereumProvider.init({
             projectId,
