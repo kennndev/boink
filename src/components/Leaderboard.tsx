@@ -23,7 +23,7 @@ export const Leaderboard = ({ connectedWallet, walletProviders }: LeaderboardPro
   const [players, setPlayers] = useState<PlayerStats[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [sortBy, setSortBy] = useState<"wins" | "wagered" | "plays" | "winRate">("wins");
+  const [sortBy, setSortBy] = useState<"wins" | "plays" | "winRate">("wins");
   const [contract, setContract] = useState<ethers.Contract | null>(null);
   const [provider, setProvider] = useState<ethers.BrowserProvider | null>(null);
 
@@ -74,8 +74,6 @@ export const Leaderboard = ({ connectedWallet, walletProviders }: LeaderboardPro
         switch (sortBy) {
           case "wins":
             return b.wins - a.wins;
-          case "wagered":
-            return b.wagered > a.wagered ? 1 : b.wagered < a.wagered ? -1 : 0;
           case "plays":
             return b.plays - a.plays;
           case "winRate":
@@ -174,8 +172,6 @@ export const Leaderboard = ({ connectedWallet, walletProviders }: LeaderboardPro
         switch (sortBy) {
           case "wins":
             return b.wins - a.wins;
-          case "wagered":
-            return b.wagered > a.wagered ? 1 : b.wagered < a.wagered ? -1 : 0;
           case "plays":
             return b.plays - a.plays;
           case "winRate":
@@ -203,31 +199,30 @@ export const Leaderboard = ({ connectedWallet, walletProviders }: LeaderboardPro
   };
 
   return (
-    <div className="space-y-4">
+    <div className="space-y-2 sm:space-y-4">
       <div className="text-center">
-        <h2 className="text-2xl font-bold font-pixel text-gradient-cyan mb-2">
+        <h2 className="text-lg sm:text-2xl font-bold font-pixel text-gradient-cyan mb-1 sm:mb-2">
           🏆 ONCHAIN LEADERBOARD 🏆
         </h2>
-        <p className="text-sm font-retro text-muted-foreground">
+        <p className="text-xs sm:text-sm font-retro text-muted-foreground">
           Top players ranked by their performance
         </p>
       </div>
 
       {/* Sort Options */}
-      <div className="win98-border-inset p-3 bg-secondary">
-        <div className="text-sm font-retro text-gray-700 mb-2">Sort By:</div>
-        <div className="flex gap-2 flex-wrap">
+      <div className="win98-border-inset p-2 sm:p-3 bg-secondary">
+        <div className="text-xs sm:text-sm font-retro text-gray-700 mb-1 sm:mb-2">Sort By:</div>
+        <div className="grid grid-cols-2 sm:flex sm:flex-wrap gap-1.5 sm:gap-2">
           {[
             { key: "wins" as const, label: "Wins" },
-            { key: "wagered" as const, label: "Wagered" },
             { key: "plays" as const, label: "Plays" },
             { key: "winRate" as const, label: "Win Rate" },
           ].map((option) => (
             <button
               key={option.key}
-              className={`win98-border px-3 py-1 text-xs font-pixel ${
+              className={`win98-border px-2 sm:px-3 py-1.5 sm:py-1 text-xs font-pixel ${
                 sortBy === option.key
-                  ? "bg-blue-500 text-white"
+                  ? "bg-blue-500 text-gray-900 font-bold"
                   : "bg-gray-200 text-gray-800 hover:bg-gray-300"
               }`}
               onClick={() => setSortBy(option.key)}
@@ -240,75 +235,131 @@ export const Leaderboard = ({ connectedWallet, walletProviders }: LeaderboardPro
 
       {/* Error Display */}
       {error && (
-        <div className="win98-border-inset p-3 bg-red-100 border-red-500">
-          <p className="text-sm font-pixel text-red-700">❌ Error: {error}</p>
+        <div className="win98-border-inset p-2 sm:p-3 bg-red-100 border-red-500">
+          <p className="text-xs sm:text-sm font-pixel text-red-700">❌ Error: {error}</p>
         </div>
       )}
 
-      {/* Leaderboard Table */}
+      {/* Leaderboard - Desktop Table / Mobile Cards */}
       {loading ? (
-        <div className="win98-border-inset p-8 bg-secondary text-center">
-          <p className="text-lg font-pixel text-gray-600">Loading leaderboard...</p>
+        <div className="win98-border-inset p-6 sm:p-8 bg-secondary text-center">
+          <p className="text-sm sm:text-lg font-pixel text-gray-600">Loading leaderboard...</p>
         </div>
       ) : players.length === 0 ? (
-        <div className="win98-border-inset p-8 bg-secondary text-center">
-          <p className="text-lg font-pixel text-gray-600">No players found yet. Be the first!</p>
+        <div className="win98-border-inset p-6 sm:p-8 bg-secondary text-center">
+          <p className="text-sm sm:text-lg font-pixel text-gray-600">No players found yet. Be the first!</p>
         </div>
       ) : (
-        <div className="win98-border-inset p-4 bg-secondary">
-          <div className="overflow-x-auto">
-            <table className="w-full">
-              <thead>
-                <tr className="border-b-2 border-gray-400">
-                  <th className="text-left p-2 font-pixel text-sm">Rank</th>
-                  <th className="text-left p-2 font-pixel text-sm">Address</th>
-                  <th className="text-right p-2 font-pixel text-sm">Wins</th>
-                  <th className="text-right p-2 font-pixel text-sm">Plays</th>
-                  <th className="text-right p-2 font-pixel text-sm">Win Rate</th>
-                  <th className="text-right p-2 font-pixel text-sm">Wagered</th>
-                  <th className="text-right p-2 font-pixel text-sm">Paid Out</th>
-                </tr>
-              </thead>
-              <tbody>
-                {players.map((player, index) => (
-                  <tr
-                    key={player.address}
-                    className={`border-b border-gray-300 ${
-                      connectedWallet?.toLowerCase() === player.address.toLowerCase()
-                        ? "bg-blue-100"
-                        : ""
-                    }`}
-                  >
-                    <td className="p-2 font-pixel text-sm">
-                      {index === 0 ? "🥇" : index === 1 ? "🥈" : index === 2 ? "🥉" : `#${index + 1}`}
-                    </td>
-                    <td className="p-2 font-retro text-xs font-mono">
-                      {formatAddress(player.address)}
-                    </td>
-                    <td className="p-2 font-pixel text-sm text-right text-green-600 font-bold">
-                      {player.wins}
-                    </td>
-                    <td className="p-2 font-pixel text-sm text-right">{player.plays}</td>
-                    <td className="p-2 font-pixel text-sm text-right">
-                      {player.winRate.toFixed(1)}%
-                    </td>
-                    <td className="p-2 font-pixel text-sm text-right">
-                      {formatUSDC(player.wagered)}
-                    </td>
-                    <td className="p-2 font-pixel text-sm text-right text-green-600">
-                      {formatUSDC(player.paidOut)}
-                    </td>
+        <>
+          {/* Desktop Table View */}
+          <div className="hidden sm:block win98-border-inset p-2 sm:p-4 bg-secondary">
+            <div className="overflow-x-auto">
+              <table className="w-full table-fixed">
+                <colgroup>
+                  <col className="w-16" />
+                  <col className="w-40" />
+                  <col className="w-16" />
+                  <col className="w-16" />
+                  <col className="w-24" />
+                  <col className="w-28" />
+                </colgroup>
+                <thead>
+                  <tr className="border-b-2 border-gray-400">
+                    <th className="text-left text-gray-600 p-2 font-pixel text-xs sm:text-sm">Rank</th>
+                    <th className="text-left text-gray-600 p-2 font-pixel text-xs sm:text-sm">Address</th>
+                    <th className="text-right text-gray-600 p-2 font-pixel text-xs sm:text-sm">Wins</th>
+                    <th className="text-right text-gray-600 p-2 font-pixel text-xs sm:text-sm">Plays</th>
+                    <th className="text-right text-gray-600 p-2 font-pixel text-xs sm:text-sm">Win Rate</th>
+                    <th className="text-right text-gray-600 p-2 font-pixel text-xs sm:text-sm">Paid Out</th>
                   </tr>
-                ))}
-              </tbody>
-            </table>
+                </thead>
+                <tbody>
+                  {players.map((player, index) => (
+                    <tr
+                      key={player.address}
+                      className={`border-b border-gray-300 ${
+                        connectedWallet?.toLowerCase() === player.address.toLowerCase()
+                          ? "bg-blue-100"
+                          : ""
+                      }`}
+                    >
+                      <td className="p-2 font-pixel text-xs sm:text-sm">
+                        {index === 0 ? "🥇" : index === 1 ? "🥈" : index === 2 ? "🥉" : `#${index + 1}`}
+                      </td>
+                      <td className="p-2 font-retro text-xs font-mono truncate text-gray-600">
+                        {formatAddress(player.address)}
+                      </td>
+                      <td className="p-2 font-pixel text-xs sm:text-sm text-right text-green-600 font-bold">
+                        {player.wins}
+                      </td>
+                      <td className="p-2 font-pixel text-xs sm:text-sm text-right text-gray-800">
+                        {player.plays}
+                      </td>
+                      <td className="p-2 font-pixel text-xs sm:text-sm text-right text-gray-800">
+                        {player.winRate.toFixed(1)}%
+                      </td>
+                     
+                      <td className="p-2 font-pixel text-xs sm:text-sm text-right text-green-600 truncate">
+                        {formatUSDC(player.paidOut)}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
           </div>
-        </div>
+
+          {/* Mobile Card View */}
+          <div className="sm:hidden space-y-2">
+            {players.map((player, index) => (
+              <div
+                key={player.address}
+                className={`win98-border-inset p-3 bg-secondary ${
+                  connectedWallet?.toLowerCase() === player.address.toLowerCase()
+                    ? "bg-blue-100"
+                    : ""
+                }`}
+              >
+                <div className="flex items-center justify-between mb-2">
+                  <div className="flex items-center gap-2">
+                    <span className="font-pixel text-base">
+                      {index === 0 ? "🥇" : index === 1 ? "🥈" : index === 2 ? "🥉" : `#${index + 1}`}
+                    </span>
+                    <span className="font-retro text-xs font-mono text-gray-600">
+                      {formatAddress(player.address)}
+                    </span>
+                  </div>
+                  {connectedWallet?.toLowerCase() === player.address.toLowerCase() && (
+                    <span className="text-xs font-pixel text-blue-600">(You)</span>
+                  )}
+                </div>
+                <div className="grid grid-cols-2 gap-2 text-xs">
+                  <div className="flex justify-between">
+                    <span className="font-retro text-gray-600">Wins:</span>
+                    <span className="font-pixel text-green-600 font-bold">{player.wins}</span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span className="font-retro text-gray-600">Plays:</span>
+                    <span className="font-pixel text-green-600">{player.plays}</span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span className="font-retro text-gray-600">Win Rate:</span>
+                    <span className="font-pixel text-green-600">{player.winRate.toFixed(1)}%</span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span className="font-retro text-gray-600">Paid Out:</span>
+                    <span className="font-pixel text-green-600">{formatUSDC(player.paidOut)}</span>
+                  </div>
+                </div>
+              </div>
+            ))}
+          </div>
+        </>
       )}
 
       {/* Info */}
-      <div className="win98-border p-3 bg-gray-100">
-        <p className="text-xs font-retro text-gray-700">
+      <div className="win98-border p-2 sm:p-3 bg-gray-100">
+        <p className="text-[10px] sm:text-xs font-retro text-gray-700">
           💡 Leaderboard data is fetched directly from the blockchain. Your address is highlighted in blue.
         </p>
       </div>
