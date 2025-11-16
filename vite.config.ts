@@ -15,4 +15,12 @@ export default defineConfig(({ mode }) => ({
       "@": path.resolve(__dirname, "./src"),
     },
   },
+  optimizeDeps: {
+    include: ["@walletconnect/ethereum-provider"],
+  },
+  build: {
+    commonjsOptions: {
+      include: [/@walletconnect\/ethereum-provider/, /node_modules/],
+    },
+  },
 }));
