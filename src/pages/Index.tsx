@@ -21,6 +21,7 @@ import type { EthereumProvider } from "@/types/wallet";
 import { CoinFlip } from "@/components/CoinFlip";
 import { Leaderboard } from "@/components/Leaderboard";
 import { WalletConnectModal } from "@/components/WalletConnectModal";
+import { Referral } from "@/components/Referral";
 
 const Index = () => {
   const [openWindow, setOpenWindow] = useState<string | null>(null);
@@ -37,6 +38,7 @@ const Index = () => {
   const [whitepaperContent, setWhitepaperContent] = useState<string>("Loading whitepaper...");
   const [showImageModal, setShowImageModal] = useState<{ src: string; alt: string } | null>(null);
   const [volume, setVolume] = useState(0.7);
+  const [pendingRefCode, setPendingRefCode] = useState<string | null>(null);
   const { toast } = useToast();
 
   useEffect(() => {
@@ -72,6 +74,23 @@ const Index = () => {
     };
     
     loadWhitepaper();
+  }, []);
+
+  // Parse referral code from URL
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const code = params.get("refCode");
+    
+    if (code && /^0x[0-9a-fA-F]{64}$/.test(code)) {
+      setPendingRefCode(code);
+      localStorage.setItem("coinflip_refCode", code);
+    } else {
+      // Check localStorage for stored code
+      const stored = localStorage.getItem("coinflip_refCode");
+      if (stored && /^0x[0-9a-fA-F]{64}$/.test(stored)) {
+        setPendingRefCode(stored);
+      }
+    }
   }, []);
 
   // Detect available wallets on component mount
@@ -306,12 +325,13 @@ const Index = () => {
 
   const desktopApps = [
     { icon: TrashBinIcon, label: "Trash", id: "trash" },
+    { icon: infoIcon, label: "Referral", id: "referral" },
+    { icon: PhotosAlbum, label: "Photos Album", id: "dashboard" },
     { icon: Winamp, label: "Music Player", id: "winamp" },
     { icon: infoIcon, label: "Info", id: "info" },
     { icon: infoIcon, label: "Onchain Leaderboard", id: "leaderboard" },
     { icon: Coinflip, label: "COINFLIP", id: "mint" },
     { icon: StakeIcon, label: "My Stake", id: "Stakes" },
-    { icon: PhotosAlbum, label: "Photos Album", id: "dashboard" },
   ];
 
   const handleIconClick = (id: string) => {
@@ -743,6 +763,42 @@ const Index = () => {
           </div>
         ),
       },
+      referral: {
+        title: "Referral",
+        body: (
+          <div className="space-y-2 sm:space-y-4">
+            {connectedWallet ? (
+              <Referral 
+                connectedWallet={connectedWallet} 
+                walletProviders={walletProviders}
+                pendingRefCode={pendingRefCode}
+                onRefCodeUsed={() => {
+                  setPendingRefCode(null);
+                  // Clean up URL if needed
+                  const url = new URL(window.location.href);
+                  url.searchParams.delete("refCode");
+                  window.history.replaceState({}, "", url.toString());
+                }}
+              />
+            ) : (
+              <div className="text-center space-y-4">
+                <h2 className="text-lg sm:text-2xl font-bold font-military text-gradient-emerald">
+                  🎁 Referral System 🎁
+                </h2>
+                <p className="text-sm sm:text-base font-cyber text-gradient-red">
+                  Connect your wallet to use the referral system!
+                </p>
+                <div className="win98-border p-4 bg-secondary">
+                  <p className="text-center text-sm sm:text-lg font-pixel">Connect Wallet Required</p>
+                  <p className="text-center text-xs sm:text-sm mt-2 font-retro">
+                    Click the wallet icon in the taskbar to connect
+                  </p>
+                </div>
+              </div>
+            )}
+          </div>
+        ),
+      },
     };
 
     return content[id] || { title: "Window", body: <p>Content not found</p> };
@@ -914,15 +970,43 @@ const Index = () => {
       {/* Desktop Area */}
       <main className="relative flex-1 overflow-hidden">
         {/* Desktop Icons – pinned left; tighter spacing on mobile */}
-        <div className="absolute left-1 sm:left-4 top-1 sm:top-2 bottom-12 z-10 flex flex-col justify-start lg:justify-between gap-2 sm:gap-3 md:gap-4 pointer-events-auto overflow-y-auto lg:overflow-visible pr-1">
-          {desktopApps.map((app) => (
-            <DesktopIcon
-              key={app.id}
-              icon={app.icon}
-              label={app.label}
-              onClick={() => handleIconClick(app.id)}
-            />
-          ))}
+        <div className="absolute left-1 sm:left-4 top-1 sm:top-2 bottom-12 z-10 flex flex-row md:flex-row gap-2 sm:gap-3 md:gap-4 pointer-events-auto overflow-y-auto lg:overflow-visible pr-1">
+          {/* Mobile: All icons in a single column */}
+          <div className="md:hidden flex flex-col gap-2 sm:gap-3">
+            {desktopApps.map((app) => (
+              <DesktopIcon
+                key={app.id}
+                icon={app.icon}
+                label={app.label}
+                onClick={() => handleIconClick(app.id)}
+              />
+            ))}
+          </div>
+          {/* Desktop: Two columns layout */}
+          <div className="hidden md:flex gap-2 sm:gap-3 md:gap-4">
+            {/* First column: 5 icons (Trash, Referral, Photos Album, Music Player, Info) */}
+            <div className="flex flex-col gap-2 sm:gap-3 md:gap-4">
+              {desktopApps.slice(0, 5).map((app) => (
+                <DesktopIcon
+                  key={app.id}
+                  icon={app.icon}
+                  label={app.label}
+                  onClick={() => handleIconClick(app.id)}
+                />
+              ))}
+            </div>
+            {/* Second column: 3 icons (Onchain Leaderboard, COINFLIP, My Stake) */}
+            <div className="flex flex-col gap-2 sm:gap-3 md:gap-4">
+              {desktopApps.slice(5).map((app) => (
+                <DesktopIcon
+                  key={app.id}
+                  icon={app.icon}
+                  label={app.label}
+                  onClick={() => handleIconClick(app.id)}
+                />
+              ))}
+            </div>
+          </div>
         </div>
 
         {/* Centered wallpaper + BOINK below icons */}
