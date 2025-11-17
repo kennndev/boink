@@ -1,0 +1,585 @@
+import { useState, useEffect } from "react";
+import { ethers } from "ethers";
+import { useToast } from "@/hooks/use-toast";
+import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import referralRegistryABI from "../ReferralRegistry.json";
+import type { EthereumProvider } from "@/types/wallet";
+
+interface ReferralProps {
+  connectedWallet: string | null;
+  walletProviders: Record<string, EthereumProvider>;
+  pendingRefCode?: string | null;
+  onRefCodeUsed?: () => void;
+}
+
+export const Referral = ({ 
+  connectedWallet, 
+  walletProviders,
+  pendingRefCode,
+  onRefCodeUsed 
+}: ReferralProps) => {
+  const [contract, setContract] = useState<ethers.Contract | null>(null);
+  const [provider, setProvider] = useState<ethers.BrowserProvider | null>(null);
+  const [signer, setSigner] = useState<ethers.JsonRpcSigner | null>(null);
+  const [address, setAddress] = useState<string | null>(null);
+  
+  // Referral code state
+  const [myCode, setMyCode] = useState<string | null>(null);
+  const [manualCode, setManualCode] = useState<string>("");
+  const [hasUsedCode, setHasUsedCode] = useState<boolean>(false);
+  const [referrer, setReferrer] = useState<string | null>(null);
+  
+  // Stats state
+  const [totalReferrals, setTotalReferrals] = useState<number>(0);
+  const [isActive, setIsActive] = useState<boolean>(false);
+  
+  // Loading states
+  const [isGenerating, setIsGenerating] = useState<boolean>(false);
+  const [isSubmitting, setIsSubmitting] = useState<boolean>(false);
+  const [isLoading, setIsLoading] = useState<boolean>(true);
+  
+  const { toast } = useToast();
+
+  const REFERRAL_REGISTRY_ADDRESS = import.meta.env.VITE_REFERRAL_REGISTORY_ADDRESS || "0x6C02bb7536d71a69F3d38E448422C80445D26b0d";
+  const EXPECTED_CHAIN_ID = import.meta.env.VITE_CHAIN_ID || "763373";
+
+  // Initialize contract and check user status
+  useEffect(() => {
+    if (!connectedWallet || !walletProviders[connectedWallet]) {
+      setIsLoading(false);
+      return;
+    }
+
+    const init = async () => {
+      try {
+        const ethereumProvider = walletProviders[connectedWallet];
+        const browserProvider = new ethers.BrowserProvider(ethereumProvider);
+        setProvider(browserProvider);
+
+        const network = await browserProvider.getNetwork();
+        const currentChainId = network.chainId.toString();
+
+        if (currentChainId !== EXPECTED_CHAIN_ID) {
+          toast({
+            variant: "destructive",
+            title: "Wrong Network",
+            description: `Please switch to the correct network (Chain ID: ${EXPECTED_CHAIN_ID})`,
+          });
+          setIsLoading(false);
+          return;
+        }
+
+        const accounts = await browserProvider.listAccounts();
+        if (accounts.length === 0) {
+          setIsLoading(false);
+          return;
+        }
+
+        const userAddress = accounts[0].address;
+        setAddress(userAddress);
+        const userSigner = await browserProvider.getSigner();
+        setSigner(userSigner);
+
+        const referralContract = new ethers.Contract(
+          REFERRAL_REGISTRY_ADDRESS,
+          referralRegistryABI,
+          browserProvider
+        );
+        setContract(referralContract);
+
+        // Check if user has used a referral code
+        const used = await referralContract.hasUsedCode(userAddress);
+        setHasUsedCode(used);
+
+        // If user has used a code, get their referrer
+        if (used) {
+          const referrerAddress = await referralContract.referrerOf(userAddress);
+          if (referrerAddress && referrerAddress !== ethers.ZeroAddress) {
+            setReferrer(referrerAddress);
+          }
+        }
+
+        // Get user's referral code and stats
+        const userCode = await referralContract.codeOfReferrer(userAddress);
+        if (userCode && userCode !== ethers.ZeroHash) {
+          setMyCode(userCode);
+
+          // Get stats
+          const [code, totalRefs, active] = await referralContract.getReferrerStats(userAddress);
+          if (code && code !== ethers.ZeroHash) {
+            setTotalReferrals(Number(totalRefs));
+            setIsActive(active);
+          }
+        }
+      } catch (error: any) {
+        console.error("Referral initialization error:", error);
+        toast({
+          variant: "destructive",
+          title: "Error",
+          description: error?.message || "Failed to initialize referral system",
+        });
+      } finally {
+        setIsLoading(false);
+      }
+    };
+
+    init();
+  }, [connectedWallet, walletProviders, REFERRAL_REGISTRY_ADDRESS, EXPECTED_CHAIN_ID, toast]);
+
+  // Extract referral code from URL or validate code format
+  const extractCode = (input: string): string | null => {
+    // If it's a full URL, try to extract the refCode parameter
+    if (input.includes('refCode=')) {
+      try {
+        const url = new URL(input);
+        const code = url.searchParams.get('refCode');
+        if (code) return code;
+      } catch (e) {
+        // If URL parsing fails, try regex extraction
+        const match = input.match(/refCode=([0-9a-fA-Fx]+)/i);
+        if (match && match[1]) {
+          // Ensure it starts with 0x
+          return match[1].startsWith('0x') ? match[1] : `0x${match[1]}`;
+        }
+      }
+    }
+    // If it's already a code, return it
+    if (/^0x[0-9a-fA-F]{64}$/.test(input.trim())) {
+      return input.trim();
+    }
+    return null;
+  };
+
+  // Validate code format
+  const isValidCode = (code: string): boolean => {
+    return /^0x[0-9a-fA-F]{64}$/.test(code);
+  };
+
+  // Check if code is valid on-chain
+  const isCodeValid = async (code: string): Promise<boolean> => {
+    if (!contract) return false;
+    try {
+      const codeData = await contract.codes(code);
+      return codeData && codeData.active;
+    } catch (error) {
+      console.error("Error checking code validity:", error);
+      return false;
+    }
+  };
+
+  // Generate referral code
+  const handleGenerateCode = async () => {
+    if (!contract || !signer || !address) {
+      toast({
+        variant: "destructive",
+        title: "Error",
+        description: "Please connect your wallet first",
+      });
+      return;
+    }
+
+    // Check if user already has a code
+    try {
+      const existingCode = await contract.codeOfReferrer(address);
+      if (existingCode && existingCode !== ethers.ZeroHash) {
+        toast({
+          variant: "destructive",
+          title: "Already Have Code",
+          description: "You already have a referral code. Check the 'Your Progress' tab to see it.",
+        });
+        setMyCode(existingCode);
+        // Refresh stats
+        const [code, totalRefs, active] = await contract.getReferrerStats(address);
+        if (code && code !== ethers.ZeroHash) {
+          setTotalReferrals(Number(totalRefs));
+          setIsActive(active);
+        }
+        return;
+      }
+    } catch (error) {
+      console.error("Error checking existing code:", error);
+    }
+
+    setIsGenerating(true);
+    try {
+      const contractWithSigner = contract.connect(signer) as any;
+      const salt = ethers.keccak256(
+        ethers.toUtf8Bytes(Date.now().toString() + Math.random().toString())
+      );
+
+      const tx = await contractWithSigner.createReferralCode(salt);
+      toast({
+        title: "Transaction Sent",
+        description: "Waiting for confirmation...",
+      });
+
+      await tx.wait();
+
+      // Get the new code
+      const newCode = await contract.codeOfReferrer(address!);
+      setMyCode(newCode);
+      setIsActive(true);
+      setTotalReferrals(0);
+
+      toast({
+        title: "Success",
+        description: "Referral code generated successfully!",
+      });
+    } catch (error: any) {
+      console.error("Error generating code:", error);
+      
+      // Parse error message for better user feedback
+      let errorMessage = "Failed to generate referral code";
+      
+      if (error?.message) {
+        if (error.message.includes("revert") || error.message.includes("CALL_EXCEPTION")) {
+          // Check if user already has a code (common restriction)
+          try {
+            const existingCode = await contract.codeOfReferrer(address!);
+            if (existingCode && existingCode !== ethers.ZeroHash) {
+              errorMessage = "You already have a referral code. Check 'Your Progress' tab.";
+              setMyCode(existingCode);
+            } else if (hasUsedCode) {
+              errorMessage = "You cannot generate a referral code after using someone else's code. This is a contract restriction.";
+            } else {
+              errorMessage = "Contract rejected the transaction. You may already have a code or there's a restriction.";
+            }
+          } catch (checkError) {
+            errorMessage = "Transaction failed. The contract may prevent creating a code if you've already used one.";
+          }
+        } else {
+          errorMessage = error.message;
+        }
+      }
+      
+      toast({
+        variant: "destructive",
+        title: "Error",
+        description: errorMessage,
+      });
+    } finally {
+      setIsGenerating(false);
+    }
+  };
+
+  // Use referral code
+  const handleUseCode = async (code: string) => {
+    if (!contract || !signer) {
+      toast({
+        variant: "destructive",
+        title: "Error",
+        description: "Please connect your wallet first",
+      });
+      return;
+    }
+
+    // Extract code from URL if needed
+    const extractedCode = extractCode(code);
+    if (!extractedCode || !isValidCode(extractedCode)) {
+      toast({
+        variant: "destructive",
+        title: "Invalid Code",
+        description: "Please enter a valid referral code (0x followed by 64 hex characters) or a URL containing refCode",
+      });
+      return;
+    }
+
+    // Use the extracted code
+    const finalCode = extractedCode;
+
+    setIsSubmitting(true);
+    try {
+      // Validate code on-chain
+      const valid = await isCodeValid(finalCode);
+      if (!valid) {
+        toast({
+          variant: "destructive",
+          title: "Invalid Code",
+          description: "This referral code is invalid or inactive",
+        });
+        setIsSubmitting(false);
+        return;
+      }
+
+      const contractWithSigner = contract.connect(signer) as any;
+      const tx = await contractWithSigner.useReferralCode(finalCode);
+      toast({
+        title: "Transaction Sent",
+        description: "Waiting for confirmation...",
+      });
+
+      await tx.wait();
+
+      setHasUsedCode(true);
+      setManualCode("");
+      
+      // Get referrer address
+      const referrerAddress = await contract.referrerOf(address!);
+      if (referrerAddress && referrerAddress !== ethers.ZeroAddress) {
+        setReferrer(referrerAddress);
+      }
+
+      // Clear pending ref code from localStorage
+      localStorage.removeItem("coinflip_refCode");
+      if (onRefCodeUsed) {
+        onRefCodeUsed();
+      }
+
+      toast({
+        title: "Success",
+        description: "Referral code applied successfully!",
+      });
+    } catch (error: any) {
+      console.error("Error using code:", error);
+      toast({
+        variant: "destructive",
+        title: "Error",
+        description: error?.message || "Failed to use referral code",
+      });
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
+
+  // Copy code to clipboard
+  const handleCopyCode = async () => {
+    if (!myCode) return;
+    try {
+      await navigator.clipboard.writeText(myCode);
+      toast({
+        title: "Copied!",
+        description: "Referral code copied to clipboard",
+      });
+    } catch (error) {
+      toast({
+        variant: "destructive",
+        title: "Error",
+        description: "Failed to copy to clipboard",
+      });
+    }
+  };
+
+
+  if (!connectedWallet) {
+    return (
+      <div className="text-center space-y-2 sm:space-y-3">
+        <h2 className="text-base sm:text-lg font-bold font-military text-gradient-emerald">
+          🎁 Referral System 🎁
+        </h2>
+        <p className="text-xs sm:text-sm font-cyber text-gradient-red">
+          Connect your wallet to use the referral system!
+        </p>
+        <div className="win98-border p-2 sm:p-3 bg-secondary">
+          <p className="text-center text-xs sm:text-sm font-pixel">Connect Wallet Required</p>
+          <p className="text-center text-xs mt-1 sm:mt-2 font-retro">
+            Click the wallet icon in the taskbar to connect
+          </p>
+        </div>
+      </div>
+    );
+  }
+
+  if (isLoading) {
+    return (
+      <div className="text-center space-y-2">
+        <p className="text-xs sm:text-sm font-retro">Loading referral data...</p>
+      </div>
+    );
+  }
+
+  return (
+    <div className="space-y-3 sm:space-y-3 pb-2">
+      <h2 className="text-base sm:text-lg font-bold font-military text-gradient-emerald">
+        🎁 Referral System 🎁
+      </h2>
+
+      <Tabs defaultValue="code" className="w-full">
+        <TabsList className="grid w-full grid-cols-2 h-auto sm:h-8 gap-1.5 sm:gap-1 p-1 sm:p-1">
+          <TabsTrigger 
+            value="code" 
+            className="font-pixel text-xs sm:text-sm px-1.5 sm:px-3 py-2.5 sm:py-1.5 touch-manipulation min-h-[44px] sm:min-h-0 whitespace-normal sm:whitespace-nowrap text-center leading-tight"
+          >
+            Referral Code
+          </TabsTrigger>
+          <TabsTrigger 
+            value="progress" 
+            className="font-pixel text-xs sm:text-sm px-1.5 sm:px-3 py-2.5 sm:py-1.5 touch-manipulation min-h-[44px] sm:min-h-0 whitespace-normal sm:whitespace-nowrap text-center leading-tight"
+          >
+            Your Progress
+          </TabsTrigger>
+        </TabsList>
+
+        {/* Referral Code Tab */}
+        <TabsContent value="code" className="space-y-3 sm:space-y-3 mt-3 sm:mt-2">
+          {/* Show if user already used a code */}
+          {hasUsedCode && (
+            <div className="win98-border-inset p-2 sm:p-3 bg-green-100">
+              <p className="text-xs sm:text-sm font-retro text-green-800">
+                ✓ You have already used a referral code
+              </p>
+              {referrer && (
+                <p className="text-xs font-pixel text-green-700 mt-1">
+                  Referred by: <span className="font-mono">{referrer.slice(0, 6)}...{referrer.slice(-4)}</span>
+                </p>
+              )}
+              <p className="text-xs font-retro text-green-700 mt-1">
+                💡 You can still generate your own code below to refer others!
+              </p>
+            </div>
+          )}
+
+          {/* Show pending ref code from URL */}
+          {!hasUsedCode && pendingRefCode && (
+            <div className="win98-border-inset p-2 sm:p-3 bg-blue-100">
+              <p className="text-xs sm:text-sm font-retro text-blue-800 mb-2">
+                📎 Referral code detected from link:
+              </p>
+              <code className="text-[10px] sm:text-xs font-mono bg-white p-2 sm:p-1.5 block mb-2 break-all leading-relaxed">
+                {pendingRefCode}
+              </code>
+              <Button
+                onClick={() => handleUseCode(pendingRefCode)}
+                disabled={isSubmitting}
+                className="w-full font-pixel text-xs sm:text-sm h-11 sm:h-8 touch-manipulation"
+              >
+                {isSubmitting ? "Processing..." : "Use This Code"}
+              </Button>
+            </div>
+          )}
+
+          {/* Manual code input */}
+          {!hasUsedCode && (
+            <div className="win98-border-inset p-2 sm:p-3 space-y-2">
+              <h3 className="text-xs sm:text-sm font-bold font-military text-gradient-blue">
+                Do you have a referral code?
+              </h3>
+              <div className="space-y-2">
+                <Input
+                  value={manualCode}
+                  onChange={(e) => {
+                    const input = e.target.value;
+                    // Auto-extract code from URL if pasted
+                    const extracted = extractCode(input);
+                    if (extracted && extracted !== input) {
+                      // If we extracted a code from URL, show only the code
+                      setManualCode(extracted);
+                    } else {
+                      setManualCode(input);
+                    }
+                  }}
+                  onPaste={(e) => {
+                    // Handle paste event to extract code from URL
+                    const pastedText = e.clipboardData.getData('text');
+                    const extracted = extractCode(pastedText);
+                    if (extracted) {
+                      e.preventDefault();
+                      setManualCode(extracted);
+                    }
+                  }}
+                  placeholder="Paste referral code or URL"
+                  className="font-mono text-xs sm:text-sm h-11 sm:h-8 touch-manipulation"
+                />
+                <Button
+                  onClick={() => handleUseCode(manualCode)}
+                  disabled={isSubmitting || !manualCode.trim()}
+                  className="w-full font-pixel text-xs sm:text-sm h-11 sm:h-8 touch-manipulation"
+                >
+                  {isSubmitting ? "Processing..." : "Add Referral Code"}
+                </Button>
+              </div>
+            </div>
+          )}
+
+          {/* Generate code section */}
+          <div className="win98-border-inset p-2 sm:p-3 space-y-2">
+            <h3 className="text-xs sm:text-sm font-bold font-military text-gradient-purple">
+              Generate Your Referral Code
+            </h3>
+            <p className="text-xs font-retro text-muted-foreground mb-1">
+              Create your own referral code to share with others and track your referrals
+            </p>
+          
+            {myCode ? (
+              <div className="space-y-2">
+                <div className="win98-border p-2 sm:p-3 bg-secondary">
+                  <p className="text-xs sm:text-sm font-retro text-muted-foreground mb-1.5 sm:mb-1">Your Referral Code:</p>
+                  <code className="text-[10px] sm:text-xs text-black font-mono break-all block bg-white p-2 sm:p-1.5 leading-relaxed">
+                    {myCode}
+                  </code>
+                </div>
+                <Button
+                  onClick={handleCopyCode}
+                  variant="outline"
+                  className="w-full font-pixel text-xs sm:text-sm h-11 sm:h-8 touch-manipulation"
+                >
+                  Copy Code
+                </Button>
+                {!isActive && (
+                  <p className="text-xs font-retro text-red-600">
+                    ⚠️ Your referral code is inactive
+                  </p>
+                )}
+              </div>
+            ) : (
+              <Button
+                onClick={handleGenerateCode}
+                disabled={isGenerating}
+                className="w-full font-pixel text-xs sm:text-sm h-11 sm:h-8 touch-manipulation"
+              >
+                {isGenerating ? "Generating..." : "Generate Referral Code"}
+              </Button>
+            )}
+          </div>
+        </TabsContent>
+
+        {/* Your Progress Tab */}
+        <TabsContent value="progress" className="space-y-3 sm:space-y-3 mt-3 sm:mt-2">
+          {myCode ? (
+            <div className="space-y-2 sm:space-y-3">
+              <div className="win98-border-inset p-2 sm:p-3 bg-secondary">
+                <h3 className="text-xs sm:text-sm font-bold font-military text-gradient-blue mb-2">
+                  Your Referral Statistics
+                </h3>
+                <div className="space-y-1.5 sm:space-y-2">
+                  <div className="flex justify-between items-center">
+                    <span className="text-xs sm:text-sm font-retro text-black">Total Referrals:</span>
+                    <span className="text-base sm:text-lg font-bold font-pixel text-gradient-emerald">
+                      {totalReferrals}
+                    </span>
+                  </div>
+                  <div className="flex justify-between items-center">
+                    <span className="text-xs sm:text-sm font-retro text-black">Status:</span>
+                    <span className={`text-xs sm:text-sm font-pixel ${isActive ? 'text-green-600' : 'text-red-600'}`}>
+                      {isActive ? "✓ Active" : "✗ Inactive"}
+                    </span>
+                  </div>
+                  <div className="flex justify-between items-center">
+                    <span className="text-xs sm:text-sm font-retro text-black">Your Code:</span>
+                    <code className="text-xs font-mono text-red-600">
+                      {myCode.slice(0, 10)}...{myCode.slice(-6)}
+                    </code>
+                  </div>
+                </div>
+              </div>
+
+              <div className="win98-border-inset p-2 sm:p-3">
+                <p className="text-xs font-retro text-muted-foreground">
+                  Share your referral link to earn rewards when others use your code!
+                </p>
+              </div>
+            </div>
+          ) : (
+            <div className="win98-border-inset p-2 sm:p-3 bg-secondary text-center">
+              <p className="text-xs sm:text-sm font-retro text-muted-foreground">
+                Generate a referral code first to see your progress
+              </p>
+            </div>
+          )}
+        </TabsContent>
+      </Tabs>
+    </div>
+  );
+};
+
