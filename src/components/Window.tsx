@@ -9,8 +9,8 @@ interface WindowProps {
 
 export const Window = ({ title, onClose, children }: WindowProps) => {
   return (
-    <div className="fixed inset-0 flex items-center justify-center z-40 p-2 sm:p-4">
-      <div className="relative bg-secondary win98-border w-full sm:w-[95%] max-w-sm sm:max-w-md md:max-w-2xl h-[90vh] sm:max-h-[85vh] flex flex-col shadow-2xl min-w-[280px]">
+    <div className="fixed inset-0 flex items-center justify-center z-40 p-1 sm:p-2">
+      <div className="relative bg-secondary win98-border w-full sm:w-[95%] max-w-sm sm:max-w-md md:max-w-2xl h-[95vh] sm:h-[90vh] max-h-[95vh] sm:max-h-[90vh] flex flex-col shadow-2xl min-w-[280px]">
         {/* Title Bar */}
         <div className="h-8 bg-gray-300 win98-border-inset flex items-center px-1 sm:px-2 flex-shrink-0 gap-1 min-w-0">
           <span className="text-black font-bold text-xs sm:text-sm font-military truncate min-w-0 flex-1">{title}</span>
@@ -26,7 +26,7 @@ export const Window = ({ title, onClose, children }: WindowProps) => {
 
         {/* Window Content - Scrollable */}
         <div 
-          className="flex-1 bg-gray-300 p-2 sm:p-4 overflow-y-auto overflow-x-hidden min-h-0"
+          className="flex-1 bg-gray-300 p-3 sm:p-4 overflow-y-auto overflow-x-hidden min-h-0"
           style={{ WebkitOverflowScrolling: 'touch' }}
         >
           {children}
