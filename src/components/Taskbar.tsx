@@ -71,7 +71,11 @@ export const Taskbar = ({ onStartClick, onConnectWalletClick, connectedWallet, b
         className="h-8 sm:h-9 px-2 sm:px-3 win98-border hover:win98-border-inset flex items-center gap-1 sm:gap-2 font-bold shrink-0"
       >
         <img src={connectIcon} alt="Connect" className="w-4 h-4 sm:w-6 sm:h-6" />
-        <span className="font-cyber text-xs sm:text-sm max-w-[44vw] sm:max-w-none truncate">{connectedWallet ? `Connected: ${connectedWallet}` : "Connect Wallet"}</span>
+        <span className="font-cyber text-xs sm:text-sm max-w-[44vw] sm:max-w-none truncate">
+          {connectedWallet 
+            ? `Connected: ${connectedWallet.slice(0, 6)}...${connectedWallet.slice(-4)}` 
+            : "Connect Wallet"}
+        </span>
       </Button>
 
 
