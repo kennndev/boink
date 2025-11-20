@@ -54,34 +54,144 @@ export async function verifyTwitterFollow(userTwitterId, targetUsername = 'boink
 }
 
 /**
+ * Detect if credentials are OAuth 2.0 instead of OAuth 1.0a
+ * OAuth 2.0 Client IDs often have specific patterns
+ * @param {string} clientId - The client ID to check
+ * @returns {boolean} True if likely OAuth 2.0 credentials
+ */
+function isOAuth2Credentials(clientId) {
+  if (!clientId) return false;
+  const trimmed = clientId.trim();
+  
+  // OAuth 2.0 Client IDs often start with specific prefixes or have different patterns
+  // Common patterns: longer strings, different character distribution
+  // OAuth 1.0a API Keys are typically 20-25 characters, alphanumeric
+  // OAuth 2.0 Client IDs are often longer (30+ characters) and may have different formats
+  
+  // If it's very long (40+ chars), it's likely OAuth 2.0
+  if (trimmed.length > 40) {
+    return true;
+  }
+  
+  // Check for common OAuth 2.0 patterns (these are heuristics)
+  // OAuth 2.0 Client IDs sometimes have different character patterns
+  // This is a best-effort detection
+  
+  return false;
+}
+
+/**
+ * Validate Twitter API credentials format
+ * @returns {Object} Validation result with isValid flag and issues array
+ */
+function validateTwitterCredentials() {
+  const issues = [];
+  const warnings = [];
+  const clientId = process.env.TWITTER_CLIENT_ID;
+  const clientSecret = process.env.TWITTER_CLIENT_SECRET;
+
+  if (!clientId) {
+    issues.push('TWITTER_CLIENT_ID is not set');
+  } else {
+    const trimmedId = clientId.trim();
+    if (trimmedId === '') {
+      issues.push('TWITTER_CLIENT_ID is empty');
+    } else if (trimmedId.length < 10) {
+      issues.push('TWITTER_CLIENT_ID appears to be too short (should be 20+ characters)');
+    }
+    
+    // Check for OAuth 2.0 credentials (common mistake)
+    if (isOAuth2Credentials(trimmedId) || trimmedId.length > 35) {
+      warnings.push('⚠️  CRITICAL: Your TWITTER_CLIENT_ID appears to be OAuth 2.0 credentials, but this code requires OAuth 1.0a credentials!\n' +
+        '   → You need to use "API Key" and "API Key Secret" from the "Consumer Keys" section\n' +
+        '   → NOT "OAuth 2.0 Client ID" and "OAuth 2.0 Client Secret"\n' +
+        '   → Enable OAuth 1.0a in your Twitter App → "User authentication settings"');
+    }
+    
+    // Check for common issues
+    if (trimmedId.includes(' ')) {
+      issues.push('TWITTER_CLIENT_ID contains spaces (may need trimming)');
+    }
+    if (trimmedId.startsWith('"') || trimmedId.endsWith('"')) {
+      issues.push('TWITTER_CLIENT_ID appears to have quotes around it (remove quotes)');
+    }
+  }
+
+  if (!clientSecret) {
+    issues.push('TWITTER_CLIENT_SECRET is not set');
+  } else {
+    const trimmedSecret = clientSecret.trim();
+    if (trimmedSecret === '') {
+      issues.push('TWITTER_CLIENT_SECRET is empty');
+    } else if (trimmedSecret.length < 10) {
+      issues.push('TWITTER_CLIENT_SECRET appears to be too short (should be 40+ characters)');
+    }
+    
+    // Check for common issues
+    if (trimmedSecret.includes(' ')) {
+      issues.push('TWITTER_CLIENT_SECRET contains spaces (may need trimming)');
+    }
+    if (trimmedSecret.startsWith('"') || trimmedSecret.endsWith('"')) {
+      issues.push('TWITTER_CLIENT_SECRET appears to have quotes around it (remove quotes)');
+    }
+  }
+
+  return {
+    isValid: issues.length === 0,
+    issues,
+    warnings
+  };
+}
+
+/**
  * Alternative: Verify using OAuth flow
  * This requires the user to authenticate with Twitter
  */
 export async function getTwitterOAuthUrl(callbackUrl, state = null) {
   try {
-    // Validate credentials
-    if (!process.env.TWITTER_CLIENT_ID || !process.env.TWITTER_CLIENT_SECRET) {
-      throw new Error('Twitter API credentials not configured');
+    // Validate credentials format first
+    const validation = validateTwitterCredentials();
+    
+    // Log warnings (like OAuth 2.0 vs 1.0a mismatch)
+    if (validation.warnings && validation.warnings.length > 0) {
+      console.error('[Twitter OAuth] ⚠️  WARNING - Credential Type Mismatch:');
+      validation.warnings.forEach(warning => console.error(warning));
+    }
+    
+    if (!validation.isValid) {
+      let errorMsg = 'Twitter API credentials validation failed:\n' + validation.issues.map(issue => `- ${issue}`).join('\n');
+      if (validation.warnings && validation.warnings.length > 0) {
+        errorMsg += '\n\n' + validation.warnings.join('\n');
+      }
+      console.error('[Twitter OAuth] Credential validation failed:', validation.issues);
+      throw new Error(errorMsg);
     }
 
-    // Check if credentials are empty strings
-    if (process.env.TWITTER_CLIENT_ID.trim() === '' || process.env.TWITTER_CLIENT_SECRET.trim() === '') {
-      throw new Error('Twitter API credentials are empty');
-    }
+    // Get trimmed credentials
+    const clientId = process.env.TWITTER_CLIENT_ID.trim();
+    const clientSecret = process.env.TWITTER_CLIENT_SECRET.trim();
 
-    const client = new TwitterApi({
-      appKey: process.env.TWITTER_CLIENT_ID.trim(),
-      appSecret: process.env.TWITTER_CLIENT_SECRET.trim(),
+    // Log credential info (safely, without exposing full values)
+    console.log('[Twitter OAuth] Credential info:', {
+      clientIdLength: clientId.length,
+      clientSecretLength: clientSecret.length,
+      clientIdPrefix: clientId.substring(0, 10) + '...',
+      callbackUrl: callbackUrl
     });
 
-    console.log('Generating Twitter OAuth link with callback:', callbackUrl);
-    console.log('Using Twitter Client ID:', process.env.TWITTER_CLIENT_ID.substring(0, 10) + '...');
+    // Create Twitter API client with OAuth 1.0a credentials
+    const client = new TwitterApi({
+      appKey: clientId,
+      appSecret: clientSecret,
+    });
+
+    console.log('[Twitter OAuth] Generating OAuth link with callback:', callbackUrl);
+    console.log('[Twitter OAuth] Note: Wallet address will be retrieved via oauth_token lookup (OAuth 1.0a doesn\'t support state parameter)');
     
-    // Generate OAuth link with optional state parameter (for passing wallet address)
+    // Generate OAuth link
+    // Note: OAuth 1.0a doesn't support state parameter, so we'll use oauth_token to look up the wallet address
+    // The state parameter is kept for potential future OAuth 2.0 support, but won't be used in OAuth 1.0a
     const authOptions = { linkMode: 'authorize' };
-    if (state) {
-      authOptions.state = state;
-    }
     
     const { url, oauth_token, oauth_token_secret } = await client.generateAuthLink(
       callbackUrl,
@@ -92,14 +202,15 @@ export async function getTwitterOAuthUrl(callbackUrl, state = null) {
       throw new Error('Failed to generate OAuth link - missing required data');
     }
 
+    console.log('[Twitter OAuth] Successfully generated OAuth URL');
     return {
       url,
       oauth_token,
       oauth_token_secret,
     };
   } catch (error) {
-    console.error('Error generating Twitter OAuth URL:', error);
-    console.error('Error details:', {
+    console.error('[Twitter OAuth] Error generating Twitter OAuth URL:', error);
+    console.error('[Twitter OAuth] Error details:', {
       message: error.message,
       code: error.code,
       twitterErrorCode: error.errors?.[0]?.code,
@@ -109,15 +220,61 @@ export async function getTwitterOAuthUrl(callbackUrl, state = null) {
     
     // Provide helpful error messages for common issues
     if (error.code === 401 || (error.errors && error.errors[0]?.code === 32)) {
-      const helpfulError = new Error(
-        'Twitter API authentication failed. Please check:\n' +
-        '1. TWITTER_CLIENT_ID and TWITTER_CLIENT_SECRET are correct\n' +
-        '2. Credentials are from the same Twitter App\n' +
-        '3. Twitter App has OAuth 1.0a enabled\n' +
-        '4. Callback URL is registered in Twitter App settings: ' + callbackUrl
-      );
-      helpfulError.originalError = error;
-      throw helpfulError;
+      // Check if this might be an OAuth 2.0 vs 1.0a mismatch
+      const clientId = process.env.TWITTER_CLIENT_ID?.trim() || '';
+      const mightBeOAuth2 = isOAuth2Credentials(clientId) || clientId.length > 35;
+      
+      let errorMessage = 'Twitter API authentication failed (Error Code 32). This usually means:\n\n';
+      
+      if (mightBeOAuth2) {
+        errorMessage += '⚠️  **CRITICAL ISSUE DETECTED:** You appear to be using OAuth 2.0 credentials!\n\n' +
+        'This code requires OAuth 1.0a credentials, but you\'re using OAuth 2.0 Client ID/Secret.\n\n' +
+        '🔧 **FIX THIS FIRST:**\n' +
+        '1. Go to https://developer.twitter.com/en/portal/dashboard\n' +
+        '2. Select your app → "Keys and tokens" tab\n' +
+        '3. Scroll to "Consumer Keys" section (NOT "OAuth 2.0 Client ID and Client Secret")\n' +
+        '4. Copy the "API Key" (this is your TWITTER_CLIENT_ID)\n' +
+        '5. Copy the "API Key Secret" (this is your TWITTER_CLIENT_SECRET)\n' +
+        '6. Update your environment variables with these values\n\n' +
+        '📋 **Also enable OAuth 1.0a:**\n' +
+        '1. Go to your Twitter App → "User authentication settings"\n' +
+        '2. Click "Set up" or "Edit"\n' +
+        '3. Enable "OAuth 1.0a"\n' +
+        '4. Set App permissions to "Read" (or "Read and Write")\n' +
+        '5. Add callback URL: ' + callbackUrl + '\n' +
+        '6. Click "Save"\n\n';
+      } else {
+        errorMessage += '1. ❌ TWITTER_CLIENT_ID and TWITTER_CLIENT_SECRET are incorrect or don\'t match\n' +
+        '   → Go to https://developer.twitter.com/en/portal/dashboard\n' +
+        '   → Select your app → "Keys and tokens" tab\n' +
+        '   → Use "API Key" and "API Key Secret" from "Consumer Keys" section (OAuth 1.0a)\n' +
+        '   → NOT "OAuth 2.0 Client ID" and "OAuth 2.0 Client Secret"\n' +
+        '   → Verify they are from the SAME app\n\n' +
+        '2. ❌ OAuth 1.0a is not enabled in your Twitter App\n' +
+        '   → Go to your Twitter App → "User authentication settings"\n' +
+        '   → Enable "OAuth 1.0a"\n' +
+        '   → Set App permissions to "Read" (or "Read and Write")\n' +
+        '   → Click "Save"\n\n';
+      }
+      
+      errorMessage += '3. ❌ Callback URL is not registered\n' +
+        '   → In "User authentication settings", add this callback URL:\n' +
+        '   → ' + callbackUrl + '\n' +
+        '   → Click "Save" (very important!)\n\n' +
+        '4. ❌ Credentials have extra spaces or quotes\n' +
+        '   → Check your .env file or Vercel environment variables\n' +
+        '   → Remove any quotes, spaces, or newlines\n' +
+        '   → Redeploy after updating\n\n' +
+        '5. ❌ Twitter App is suspended or inactive\n' +
+        '   → Check Twitter Developer Portal for any warnings\n' +
+        '   → Ensure your developer account is active\n\n' +
+        'After fixing, wait 2-3 minutes for changes to propagate, then try again.';
+      
+      const detailedError = new Error(errorMessage);
+      detailedError.originalError = error;
+      detailedError.code = 401;
+      detailedError.twitterErrorCode = 32;
+      throw detailedError;
     }
     
     throw error;
