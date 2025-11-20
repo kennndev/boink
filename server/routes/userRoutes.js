@@ -82,13 +82,16 @@ router.post('/:walletAddress/flip', async (req, res) => {
 router.get('/:walletAddress/twitter-oauth', async (req, res) => {
   try {
     const { walletAddress } = req.params;
+    const normalizedAddress = walletAddress.toLowerCase().trim();
+    
+    console.log(`[Twitter OAuth] Request from wallet: ${normalizedAddress}`);
     
     // Check if Twitter API is configured
     const hasClientId = process.env.TWITTER_CLIENT_ID && process.env.TWITTER_CLIENT_ID.trim() !== '';
     const hasClientSecret = process.env.TWITTER_CLIENT_SECRET && process.env.TWITTER_CLIENT_SECRET.trim() !== '';
     
     if (!hasClientId || !hasClientSecret) {
-      console.log('Twitter API not configured - returning trust-based response');
+      console.log('[Twitter OAuth] Twitter API not configured - returning trust-based response');
       return res.json({
         success: false,
         message: 'Twitter API not configured. Using trust-based system.',
@@ -97,35 +100,80 @@ router.get('/:walletAddress/twitter-oauth', async (req, res) => {
     }
 
     // Build callback URL - handle both Vercel and local development
-    const protocol = req.protocol || (req.headers['x-forwarded-proto'] || 'https');
-    const host = req.get('host') || req.headers.host;
+    // For Vercel, use the request origin; for local, use localhost
+    let protocol = req.protocol || 'https';
+    let host = req.get('host') || req.headers.host;
+    
+    // Check for Vercel headers
+    if (req.headers['x-forwarded-proto']) {
+      protocol = req.headers['x-forwarded-proto'].split(',')[0].trim();
+    }
+    if (req.headers['x-forwarded-host']) {
+      host = req.headers['x-forwarded-host'].split(',')[0].trim();
+    }
+    
+    // Fallback to origin header if available
+    if (req.headers.origin && !host.includes('localhost')) {
+      try {
+        const originUrl = new URL(req.headers.origin);
+        protocol = originUrl.protocol.replace(':', '');
+        host = originUrl.host;
+      } catch (e) {
+        console.warn('[Twitter OAuth] Could not parse origin header:', e);
+      }
+    }
     
     if (!host) {
-      console.error('Cannot determine host for callback URL');
-      return res.status(500).json({
+      console.error('[Twitter OAuth] Cannot determine host for callback URL');
+      return res.json({
         success: false,
-        message: 'Cannot determine callback URL. Please check server configuration.',
-        trustBased: true // Fall back to trust-based system
+        message: 'Cannot determine callback URL. Using trust-based system.',
+        trustBased: true
       });
     }
     
-    const callbackUrl = `${protocol}://${host}/api/users/${walletAddress}/twitter-callback`;
-    console.log('Generating Twitter OAuth URL with callback:', callbackUrl);
+    const callbackUrl = `${protocol}://${host}/api/users/${normalizedAddress}/twitter-callback`;
+    console.log(`[Twitter OAuth] Generating OAuth URL for wallet ${normalizedAddress}`);
+    console.log(`[Twitter OAuth] Callback URL: ${callbackUrl}`);
+    console.log(`[Twitter OAuth] Protocol: ${protocol}, Host: ${host}`);
 
     try {
       const oauthData = await getTwitterOAuthUrl(callbackUrl);
       
-      // Store oauth_token_secret temporarily (in production, use Redis or database)
-      // For now, we'll return it to the client to send back
+      // Store oauth_token_secret in the database for this user
+      // This allows us to retrieve it when the callback happens
+      let user = await User.findOne({ walletAddress: normalizedAddress });
+      
+      if (!user) {
+        user = new User({
+          walletAddress: normalizedAddress,
+          points: 0
+        });
+      }
+      
+      // Store the oauth_token and oauth_token_secret temporarily
+      // These will be used when the user returns from Twitter
+      // IMPORTANT: Each user gets their own OAuth tokens - this allows each user to authenticate separately
+      user.oauthToken = oauthData.oauth_token;
+      user.oauthTokenSecret = oauthData.oauth_token_secret;
+      await user.save();
+      
+      console.log(`[Twitter OAuth] OAuth tokens stored for wallet ${normalizedAddress}`);
+      console.log(`[Twitter OAuth] OAuth URL generated successfully`);
+      
+      // Return only the OAuth URL to the client (don't expose the secret)
       res.json({
         success: true,
-        oauthUrl: oauthData.url,
-        oauthToken: oauthData.oauth_token,
-        oauthTokenSecret: oauthData.oauth_token_secret
+        oauthUrl: oauthData.url
       });
     } catch (twitterError) {
       // If Twitter API call fails, fall back to trust-based system
-      console.error('Twitter API error - falling back to trust-based system:', twitterError);
+      console.error('[Twitter OAuth] Twitter API error - falling back to trust-based system:', twitterError);
+      console.error('[Twitter OAuth] Error details:', {
+        message: twitterError.message,
+        code: twitterError.code,
+        stack: twitterError.stack
+      });
       return res.json({
         success: false,
         message: 'Twitter API error. Using trust-based system.',
@@ -134,8 +182,8 @@ router.get('/:walletAddress/twitter-oauth', async (req, res) => {
       });
     }
   } catch (error) {
-    console.error('Error generating Twitter OAuth URL:', error);
-    console.error('Error stack:', error.stack);
+    console.error('[Twitter OAuth] Error generating Twitter OAuth URL:', error);
+    console.error('[Twitter OAuth] Error stack:', error.stack);
     
     // Always fall back to trust-based system instead of returning 500
     res.json({
@@ -151,50 +199,85 @@ router.get('/:walletAddress/twitter-oauth', async (req, res) => {
 router.get('/:walletAddress/twitter-callback', async (req, res) => {
   try {
     const { walletAddress } = req.params;
-    const { oauth_token, oauth_verifier, oauth_token_secret } = req.query;
+    const { oauth_token, oauth_verifier } = req.query;
 
-    if (!oauth_token || !oauth_verifier || !oauth_token_secret) {
-      return res.redirect(`${process.env.FRONTEND_URL || 'http://localhost:5173'}?twitter_error=missing_params`);
+    console.log(`[Twitter Callback] Received callback for wallet: ${walletAddress}`);
+    console.log(`[Twitter Callback] OAuth token present: ${!!oauth_token}, OAuth verifier present: ${!!oauth_verifier}`);
+
+    if (!oauth_token || !oauth_verifier) {
+      console.error('[Twitter Callback] Missing OAuth parameters');
+      const frontendUrl = process.env.FRONTEND_URL || (req.headers.origin || 'http://localhost:5173');
+      return res.redirect(`${frontendUrl}?twitter_error=missing_params`);
     }
 
+    // Retrieve the stored oauth_token_secret from the database
+    const normalizedAddress = walletAddress.toLowerCase().trim();
+    const user = await User.findOne({ walletAddress: normalizedAddress });
+    
+    if (!user || !user.oauthTokenSecret || user.oauthToken !== oauth_token) {
+      console.error('[Twitter Callback] OAuth token mismatch or user not found');
+      console.error('[Twitter Callback] User found:', !!user);
+      console.error('[Twitter Callback] Has token secret:', !!user?.oauthTokenSecret);
+      console.error('[Twitter Callback] Token matches:', user?.oauthToken === oauth_token);
+      const frontendUrl = process.env.FRONTEND_URL || (req.headers.origin || 'http://localhost:5173');
+      return res.redirect(`${frontendUrl}?twitter_error=invalid_token`);
+    }
+
+    console.log(`[Twitter Callback] Verifying follow for wallet ${normalizedAddress}`);
+    
+    // Now verify the follow using the stored secret
+    // This will authenticate the USER's Twitter account (not the app owner's)
     const verification = await verifyFollowAfterOAuth(
       oauth_token,
       oauth_verifier,
-      oauth_token_secret
+      user.oauthTokenSecret
     );
-
+    
+    console.log(`[Twitter Callback] Verification result:`, {
+      isFollowing: verification.isFollowing,
+      twitterUserId: verification.twitterUserId
+    });
+    
+    // Clear OAuth tokens immediately after use (security best practice)
+    user.oauthToken = null;
+    user.oauthTokenSecret = null;
+    
     if (!verification.isFollowing) {
-      return res.redirect(`${process.env.FRONTEND_URL || 'http://localhost:5173'}?twitter_error=not_following`);
+      console.log(`[Twitter Callback] User ${normalizedAddress} (Twitter ID: ${verification.twitterUserId}) is not following`);
+      await user.save();
+      const frontendUrl = process.env.FRONTEND_URL || (req.headers.origin || 'http://localhost:5173');
+      return res.redirect(`${frontendUrl}?twitter_error=not_following`);
     }
 
     // User is following, award points
-    const normalizedAddress = walletAddress.toLowerCase().trim();
     const POINTS_PER_TWITTER_FOLLOW = 10;
-
-    let user = await User.findOne({ walletAddress: normalizedAddress });
-
-    if (!user) {
-      user = new User({
-        walletAddress: normalizedAddress,
-        points: 0
-      });
-    }
 
     // Check if user already followed (prevent duplicate rewards)
     if (user.twitterFollowed) {
-      return res.redirect(`${process.env.FRONTEND_URL || 'http://localhost:5173'}?twitter_error=already_claimed`);
+      console.log(`[Twitter Callback] User ${normalizedAddress} already claimed Twitter follow points`);
+      await user.save();
+      const frontendUrl = process.env.FRONTEND_URL || (req.headers.origin || 'http://localhost:5173');
+      return res.redirect(`${frontendUrl}?twitter_error=already_claimed`);
     }
 
     // Award points and mark as followed
+    // Store the Twitter user ID to prevent duplicate claims from same Twitter account
     user.points += POINTS_PER_TWITTER_FOLLOW;
     user.twitterFollowed = true;
-    user.twitterUserId = verification.twitterUserId;
+    user.twitterUserId = verification.twitterUserId; // Store the authenticated USER's Twitter ID
     await user.save();
 
-    return res.redirect(`${process.env.FRONTEND_URL || 'http://localhost:5173'}?twitter_success=true&points=${user.points}`);
+    console.log(`[Twitter Callback] Successfully awarded ${POINTS_PER_TWITTER_FOLLOW} points to wallet ${normalizedAddress}`);
+    console.log(`[Twitter Callback] User's Twitter ID: ${verification.twitterUserId}`);
+    console.log(`[Twitter Callback] Total points: ${user.points}`);
+
+    const frontendUrl = process.env.FRONTEND_URL || (req.headers.origin || 'http://localhost:5173');
+    return res.redirect(`${frontendUrl}?twitter_success=true&points=${user.points}`);
   } catch (error) {
-    console.error('Error in Twitter OAuth callback:', error);
-    return res.redirect(`${process.env.FRONTEND_URL || 'http://localhost:5173'}?twitter_error=verification_failed`);
+    console.error('[Twitter Callback] Error in Twitter OAuth callback:', error);
+    console.error('[Twitter Callback] Error stack:', error.stack);
+    const frontendUrl = process.env.FRONTEND_URL || (req.headers.origin || 'http://localhost:5173');
+    return res.redirect(`${frontendUrl}?twitter_error=verification_failed`);
   }
 });
 
