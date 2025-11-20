@@ -1,31 +1,35 @@
 import { TwitterApi } from 'twitter-api-v2';
 
 /**
+ * @deprecated This function has authentication issues and is NOT used.
+ * 
+ * PROBLEMS WITH THIS FUNCTION:
+ * 1. Uses Bearer Token (app-level) but v2.following() requires OAuth 1.0a User Context
+ * 2. Cannot access user-specific following lists without user authentication
+ * 3. v2 API endpoints require Project attachment for user context operations
+ * 
+ * USE INSTEAD: verifyFollowAfterOAuth() - which correctly implements OAuth 1.0a user authentication
+ * 
  * Verify if a Twitter user is following a specific account
  * @param {string} userTwitterId - The Twitter user ID to check
  * @param {string} targetUsername - The username to check if they're following (e.g., 'boinknfts')
  * @returns {Promise<boolean>} - True if user is following, false otherwise
  */
 export async function verifyTwitterFollow(userTwitterId, targetUsername = 'boinknfts') {
+  console.warn('[DEPRECATED] verifyTwitterFollow() is deprecated and will not work correctly.');
+  console.warn('This function uses Bearer Token but v2.following() requires OAuth 1.0a User Context.');
+  console.warn('Use verifyFollowAfterOAuth() instead, which correctly authenticates the user.');
+  
   try {
-    // Initialize Twitter API client
-    // You'll need to set these in your .env file:
-    // TWITTER_BEARER_TOKEN - Your Twitter Bearer Token
-    // TWITTER_CLIENT_ID - Your Twitter App Client ID
-    // TWITTER_CLIENT_SECRET - Your Twitter App Client Secret
+    // This approach DOES NOT WORK because:
+    // - Bearer Token cannot access user-specific following lists
+    // - v2.following() requires OAuth 1.0a User Context authentication
+    // - v2 API requires Project attachment for user context operations
     
-    const client = new TwitterApi({
-      appKey: process.env.TWITTER_CLIENT_ID,
-      appSecret: process.env.TWITTER_CLIENT_SECRET,
-      accessToken: process.env.TWITTER_ACCESS_TOKEN,
-      accessSecret: process.env.TWITTER_ACCESS_SECRET,
-    });
-
-    // For read-only operations, you can use Bearer Token
     const bearerClient = new TwitterApi(process.env.TWITTER_BEARER_TOKEN);
     const readOnlyClient = bearerClient.readOnly;
 
-    // Get the target user's ID
+    // Get the target user's ID (this part works with Bearer Token)
     const targetUser = await readOnlyClient.v2.userByUsername(targetUsername);
     if (!targetUser.data) {
       console.error(`Target user ${targetUsername} not found`);
@@ -34,9 +38,9 @@ export async function verifyTwitterFollow(userTwitterId, targetUsername = 'boink
 
     const targetUserId = targetUser.data.id;
 
-    // Check if user is following the target account
-    // Note: This requires OAuth 1.0a User Context (user must authenticate)
-    // The following endpoint requires the user's access token
+    // THIS WILL FAIL: Bearer Token cannot access user-specific following lists
+    // The v2.following() endpoint requires OAuth 1.0a User Context
+    // See: https://developer.twitter.com/en/docs/twitter-api/users/follows/api-reference/get-users-id-following
     const following = await readOnlyClient.v2.following(userTwitterId, {
       max_results: 1000,
     });
@@ -48,7 +52,8 @@ export async function verifyTwitterFollow(userTwitterId, targetUsername = 'boink
 
     return isFollowing || false;
   } catch (error) {
-    console.error('Error verifying Twitter follow:', error);
+    console.error('Error verifying Twitter follow (this function is deprecated):', error);
+    console.error('Use verifyFollowAfterOAuth() instead for proper OAuth 1.0a user authentication.');
     return false;
   }
 }
@@ -321,25 +326,30 @@ export async function verifyFollowAfterOAuth(oauthToken, oauthVerifier, oauthTok
     
     // Use the friendships/show endpoint (v1.1) to directly check follow status
     // This endpoint doesn't require Project attachment and is more efficient
+    // Documentation: https://developer.twitter.com/en/docs/twitter-api/v1/accounts-and-users/follow-search-get-users/api-reference/get-friendships-show
+    // This endpoint requires OAuth 1.0a User Context (which we have via loggedClient)
     try {
       // Try different possible method names for friendships/show endpoint
+      // The twitter-api-v2 library may use different method names
       let relationship;
       try {
-        // Method 1: friendshipsShow (most likely)
-        relationship = await v1Client.friendshipsShow({
+        // Method 1: Direct API call (most reliable)
+        // Endpoint: GET /1.1/friendships/show.json
+        // Parameters: source_id (or source_screen_name) and target_screen_name (or target_id)
+        relationship = await v1Client.get('friendships/show.json', {
           source_id: userId,
           target_screen_name: targetUsername,
         });
       } catch (methodError) {
-        // Method 2: friendship (alternative)
+        // Method 2: friendshipsShow (if library provides this method)
         try {
-          relationship = await v1Client.friendship({
+          relationship = await v1Client.friendshipsShow({
             source_id: userId,
             target_screen_name: targetUsername,
           });
         } catch (methodError2) {
-          // Method 3: Direct API call
-          relationship = await v1Client.get('friendships/show.json', {
+          // Method 3: friendship (alternative method name)
+          relationship = await v1Client.friendship({
             source_id: userId,
             target_screen_name: targetUsername,
           });
@@ -359,22 +369,67 @@ export async function verifyFollowAfterOAuth(oauthToken, oauthVerifier, oauthTok
         accessSecret,
       };
     } catch (friendshipError) {
-      // If friendships/show fails, provide detailed error
-      console.error('[Twitter Verification] friendships/show endpoint failed:', friendshipError.message);
-      console.error('[Twitter Verification] Error details:', {
+      // If friendships/show fails, try alternative method
+      console.warn('[Twitter Verification] friendships/show endpoint failed, trying alternative method:', friendshipError.message);
+      console.warn('[Twitter Verification] Error details:', {
         code: friendshipError.code,
+        twitterErrorCode: friendshipError.errors?.[0]?.code,
         data: friendshipError.data,
         errors: friendshipError.errors
       });
       
-      // Provide helpful error message
+      // Error 453 means friendships/show endpoint is not available with current access level
+      // Fallback: Check user's following list (if available with basic access)
+      if (friendshipError.code === 403 && friendshipError.errors?.[0]?.code === 453) {
+        console.log('[Twitter Verification] friendships/show not available (code 453), trying following list method...');
+        
+        try {
+          // Alternative: Get target user ID and check if they're in the authenticated user's following list
+          // This method uses friends/ids endpoint which may be available with basic access
+          const targetUser = await v1Client.user({ screen_name: targetUsername });
+          const targetUserId = targetUser.id_str;
+          console.log(`[Twitter Verification] Target account @${targetUsername} has ID: ${targetUserId}`);
+          
+          // Get the authenticated user's following list (friends = people they follow)
+          // Note: This endpoint may have rate limits but should work with basic access
+          console.log(`[Twitter Verification] Fetching following list for user @${username}...`);
+          const friendsIds = await v1Client.friendsIds({ user_id: userId });
+          
+          // Check if target user ID is in the following list
+          const isFollowing = friendsIds.ids.includes(targetUserId);
+          
+          console.log(`[Twitter Verification] Result (via following list): @${username} ${isFollowing ? 'IS' : 'IS NOT'} following @${targetUsername}`);
+          
+          return {
+            isFollowing,
+            twitterUserId: userId,
+            twitterUsername: username,
+            accessToken,
+            accessSecret,
+          };
+        } catch (fallbackError) {
+          console.error('[Twitter Verification] Fallback method also failed:', fallbackError.message);
+          throw new Error(
+            'Twitter API access level insufficient. Error 453 means friendships/show endpoint is not available.\n\n' +
+            'SOLUTIONS:\n' +
+            '1. Upgrade your Twitter API access level in the Developer Portal\n' +
+            '2. Apply for Elevated access (free) to access friendships/show endpoint\n' +
+            '3. Or use the following list method (which also failed)\n\n' +
+            `friendships/show error: ${friendshipError.message}\n` +
+            `Fallback error: ${fallbackError.message}`
+          );
+        }
+      }
+      
+      // Other 403 errors
       if (friendshipError.code === 403) {
         throw new Error(
           'Twitter API access denied (403). Common causes:\n' +
           '1. Your Twitter App needs "Read" or "Read and Write" permissions\n' +
           '2. OAuth 1.0a must be enabled in your Twitter App settings\n' +
           '3. The user must authorize your app with the correct permissions\n' +
-          '4. Your app may need to be attached to a Project (for v2 API, but we\'re using v1.1)\n' +
+          '4. Error 453: friendships/show endpoint requires Elevated access level\n' +
+          '   → Apply for Elevated access (free) in Twitter Developer Portal\n' +
           `Original error: ${friendshipError.message}`
         );
       }
