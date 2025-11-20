@@ -6,6 +6,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import referralRegistryABI from "../ReferralRegistry.json";
 import type { EthereumProvider } from "@/types/wallet";
+import { awardReferralPoints, awardTwitterFollowPoints, getTwitterOAuthUrl, getUser } from "@/lib/api";
 
 interface ReferralProps {
   connectedWallet: string | null;
@@ -34,11 +35,14 @@ export const Referral = ({
   // Stats state
   const [totalReferrals, setTotalReferrals] = useState<number>(0);
   const [isActive, setIsActive] = useState<boolean>(false);
+  const [twitterFollowed, setTwitterFollowed] = useState<boolean>(false);
   
   // Loading states
   const [isGenerating, setIsGenerating] = useState<boolean>(false);
   const [isSubmitting, setIsSubmitting] = useState<boolean>(false);
   const [isLoading, setIsLoading] = useState<boolean>(true);
+  const [userPoints, setUserPoints] = useState<number>(0);
+  const [isClaimingTwitter, setIsClaimingTwitter] = useState<boolean>(false);
   
   const { toast } = useToast();
 
@@ -112,6 +116,17 @@ export const Referral = ({
             setTotalReferrals(Number(totalRefs));
             setIsActive(active);
           }
+        }
+
+        // Load user points
+        try {
+          const userData = await getUser(userAddress);
+          if (userData) {
+            setUserPoints(userData.points);
+            setTwitterFollowed(userData.twitterFollowed);
+          }
+        } catch (error) {
+          console.error('Error loading user points:', error);
         }
       } catch (error: any) {
         console.error("Referral initialization error:", error);
@@ -321,6 +336,29 @@ export const Referral = ({
         setReferrer(referrerAddress);
       }
 
+      // Award points for referral
+      if (address) {
+        try {
+          const pointsResult = await awardReferralPoints(address);
+          if (pointsResult.success && pointsResult.points !== undefined) {
+            setUserPoints(pointsResult.points);
+            toast({
+              title: "🎉 Points Awarded!",
+              description: `You earned ${pointsResult.pointsAwarded} points for using a referral code! Total: ${pointsResult.points} points`,
+            });
+          } else if (pointsResult.message) {
+            // Points already awarded
+            toast({
+              title: "Referral Applied",
+              description: pointsResult.message,
+            });
+          }
+        } catch (error) {
+          console.error('Error awarding referral points:', error);
+          // Don't show error toast, as referral was successful
+        }
+      }
+
       // Clear pending ref code from localStorage
       localStorage.removeItem("coinflip_refCode");
       if (onRefCodeUsed) {
@@ -361,6 +399,65 @@ export const Referral = ({
     }
   };
 
+  // Handle Twitter follow claim
+  const handleTwitterFollowClaim = async () => {
+    if (!address) {
+      toast({
+        variant: "destructive",
+        title: "Error",
+        description: "Please connect your wallet first",
+      });
+      return;
+    }
+
+    setIsClaimingTwitter(true);
+    try {
+      // First, try to get OAuth URL (if Twitter API is configured)
+      const oauthResult = await getTwitterOAuthUrl(address);
+      
+      if (oauthResult.oauthUrl) {
+        // Twitter OAuth is configured - redirect to Twitter
+        window.location.href = oauthResult.oauthUrl;
+        return;
+      }
+
+      // Fallback to trust-based system
+      const pointsResult = await awardTwitterFollowPoints(address);
+      
+      if (pointsResult.requiresOAuth) {
+        toast({
+          variant: "destructive",
+          title: "OAuth Required",
+          description: "Please use the 'Verify with Twitter' button to verify your follow.",
+        });
+        return;
+      }
+
+      if (pointsResult.success && pointsResult.points !== undefined) {
+        setUserPoints(pointsResult.points);
+        setTwitterFollowed(true);
+        toast({
+          title: "🎉 Points Awarded!",
+          description: `You earned ${pointsResult.pointsAwarded} points for following on Twitter! Total: ${pointsResult.points} points`,
+        });
+      } else if (pointsResult.message) {
+        toast({
+          title: "Already Claimed",
+          description: pointsResult.message,
+        });
+      }
+    } catch (error) {
+      console.error('Error claiming Twitter follow points:', error);
+      toast({
+        variant: "destructive",
+        title: "Error",
+        description: "Failed to claim points",
+      });
+    } finally {
+      setIsClaimingTwitter(false);
+    }
+  };
+
 
   if (!connectedWallet) {
     return (
@@ -394,6 +491,16 @@ export const Referral = ({
       <h2 className="text-base sm:text-lg font-bold font-military text-gradient-emerald">
         🎁 Referral System 🎁
       </h2>
+
+      {/* Points Display */}
+      {connectedWallet && (
+        <div className="p-2 bg-gradient-to-r from-yellow-100 to-yellow-50 win98-border">
+          <div className="flex items-center justify-between">
+            <span className="text-xs sm:text-sm font-pixel text-gray-700">💰 Points:</span>
+            <span className="text-base sm:text-lg font-bold font-military text-gradient-yellow">{userPoints}</span>
+          </div>
+        </div>
+      )}
 
       <Tabs defaultValue="code" className="w-full">
         <TabsList className="grid w-full grid-cols-2 h-auto sm:h-8 gap-1.5 sm:gap-1 p-1 sm:p-1">
@@ -491,6 +598,39 @@ export const Referral = ({
               </div>
             </div>
           )}
+
+          {/* Twitter Follow Section */}
+          <div className="win98-border-inset p-2 sm:p-3 space-y-2 bg-blue-50">
+            <h3 className="text-xs sm:text-sm font-bold font-military text-gradient-blue">
+              🐦 Follow on Twitter
+            </h3>
+            <p className="text-xs font-retro text-muted-foreground mb-2">
+              Follow us on Twitter and earn 10 points!
+            </p>
+            {twitterFollowed ? (
+              <div className="p-2 bg-green-100 win98-border">
+                <p className="text-xs font-retro text-green-800">
+                  ✓ You've already claimed Twitter follow points!
+                </p>
+              </div>
+            ) : (
+              <div className="space-y-2">
+                <Button
+                  onClick={() => window.open('https://x.com/boinknfts', '_blank')}
+                  className="w-full font-pixel text-xs sm:text-sm h-11 sm:h-8 touch-manipulation bg-blue-500 hover:bg-blue-600"
+                >
+                  Open Twitter
+                </Button>
+                <Button
+                  onClick={handleTwitterFollowClaim}
+                  disabled={isClaimingTwitter}
+                  className="w-full font-pixel text-xs sm:text-sm h-11 sm:h-8 touch-manipulation"
+                >
+                  {isClaimingTwitter ? "Verifying..." : "Verify & Claim 10 Points"}
+                </Button>
+              </div>
+            )}
+          </div>
 
           {/* Generate code section */}
           <div className="win98-border-inset p-2 sm:p-3 space-y-2">
