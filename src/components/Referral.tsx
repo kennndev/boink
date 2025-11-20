@@ -428,30 +428,35 @@ export const Referral = ({
         return;
       }
 
-      // Fallback to trust-based system
-      const pointsResult = await awardTwitterFollowPoints(address);
-      
-      if (pointsResult.requiresOAuth) {
+      // If OAuth is not configured, fall back to trust-based system
+      if (oauthResult.trustBased) {
+        // Trust-based system - award points directly
+        const pointsResult = await awardTwitterFollowPoints(address);
+        
+        if (pointsResult.success && pointsResult.points !== undefined) {
+          setUserPoints(pointsResult.points);
+          setTwitterFollowed(true);
+          toast({
+            title: "🎉 Points Awarded!",
+            description: `You earned ${pointsResult.pointsAwarded} points for following on Twitter! Total: ${pointsResult.points} points`,
+          });
+        } else if (pointsResult.message) {
+          toast({
+            title: "Already Claimed",
+            description: pointsResult.message,
+          });
+        }
+        return;
+      }
+
+      // If we get here, OAuth is configured but something went wrong
+      if (oauthResult.requiresOAuth) {
         toast({
           variant: "destructive",
           title: "OAuth Required",
           description: "Please use the 'Verify with Twitter' button to verify your follow.",
         });
         return;
-      }
-
-      if (pointsResult.success && pointsResult.points !== undefined) {
-        setUserPoints(pointsResult.points);
-        setTwitterFollowed(true);
-        toast({
-          title: "🎉 Points Awarded!",
-          description: `You earned ${pointsResult.pointsAwarded} points for following on Twitter! Total: ${pointsResult.points} points`,
-        });
-      } else if (pointsResult.message) {
-        toast({
-          title: "Already Claimed",
-          description: pointsResult.message,
-        });
       }
     } catch (error) {
       console.error('Error claiming Twitter follow points:', error);
