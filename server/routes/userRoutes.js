@@ -50,12 +50,19 @@ router.get('/twitter-callback', async (req, res) => {
     
     console.log(`[Twitter Callback] Verification result:`, {
       isFollowing: verification.isFollowing,
-      twitterUserId: verification.twitterUserId
+      twitterUserId: verification.twitterUserId,
+      trustBased: verification.trustBased || false
     });
     
     // Clear OAuth tokens immediately after use (security best practice)
     user.oauthToken = null;
     user.oauthTokenSecret = null;
+    
+    // If trust-based (all API methods failed), log warning but allow it
+    if (verification.trustBased) {
+      console.warn(`[Twitter Callback] ⚠️  Trust-based verification for wallet ${normalizedAddress}`);
+      console.warn(`[Twitter Callback] Warning: ${verification.warning || 'Could not verify via API'}`);
+    }
     
     if (!verification.isFollowing) {
       console.log(`[Twitter Callback] User ${normalizedAddress} (Twitter ID: ${verification.twitterUserId}) is not following`);
@@ -104,9 +111,24 @@ router.get('/twitter-callback', async (req, res) => {
     return res.redirect(`${frontendUrl}?twitter_success=true&points=${user.points}`);
   } catch (error) {
     console.error('[Twitter Callback] Error in Twitter OAuth callback:', error);
-    console.error('[Twitter Callback] Error stack:', error.stack);
+    console.error('[Twitter Callback] Error details:', {
+      message: error.message,
+      code: error.code,
+      stack: error.stack
+    });
+    
+    // Provide more specific error information
+    let errorType = 'verification_failed';
+    if (error.message?.includes('access denied') || error.message?.includes('403')) {
+      errorType = 'api_access_denied';
+    } else if (error.message?.includes('authentication') || error.message?.includes('401')) {
+      errorType = 'authentication_failed';
+    } else if (error.message?.includes('not following')) {
+      errorType = 'not_following';
+    }
+    
     const frontendUrl = process.env.FRONTEND_URL || (req.headers.origin || 'http://localhost:5173');
-    return res.redirect(`${frontendUrl}?twitter_error=verification_failed`);
+    return res.redirect(`${frontendUrl}?twitter_error=${errorType}`);
   }
 });
 
