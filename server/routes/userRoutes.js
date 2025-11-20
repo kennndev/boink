@@ -132,13 +132,16 @@ router.get('/:walletAddress/twitter-oauth', async (req, res) => {
       });
     }
     
-    const callbackUrl = `${protocol}://${host}/api/users/${normalizedAddress}/twitter-callback`;
+    // Use a single callback URL (without wallet address) since Twitter doesn't support wildcards
+    // We'll pass the wallet address via OAuth state parameter
+    const callbackUrl = `${protocol}://${host}/api/users/twitter-callback`;
     console.log(`[Twitter OAuth] Generating OAuth URL for wallet ${normalizedAddress}`);
     console.log(`[Twitter OAuth] Callback URL: ${callbackUrl}`);
     console.log(`[Twitter OAuth] Protocol: ${protocol}, Host: ${host}`);
 
     try {
-      const oauthData = await getTwitterOAuthUrl(callbackUrl);
+      // Pass wallet address as state parameter so we can retrieve it in the callback
+      const oauthData = await getTwitterOAuthUrl(callbackUrl, normalizedAddress);
       
       // Store oauth_token_secret in the database for this user
       // This allows us to retrieve it when the callback happens
@@ -195,13 +198,22 @@ router.get('/:walletAddress/twitter-oauth', async (req, res) => {
   }
 });
 
-// Twitter OAuth callback
-router.get('/:walletAddress/twitter-callback', async (req, res) => {
+// Twitter OAuth callback (single endpoint - wallet address passed via state parameter)
+router.get('/twitter-callback', async (req, res) => {
   try {
-    const { walletAddress } = req.params;
-    const { oauth_token, oauth_verifier } = req.query;
+    const { oauth_token, oauth_verifier, state } = req.query;
 
-    console.log(`[Twitter Callback] Received callback for wallet: ${walletAddress}`);
+    // Get wallet address from state parameter (passed during OAuth initiation)
+    if (!state) {
+      console.error('[Twitter Callback] No wallet address in state parameter');
+      const frontendUrl = process.env.FRONTEND_URL || (req.headers.origin || 'http://localhost:5173');
+      return res.redirect(`${frontendUrl}?twitter_error=missing_wallet`);
+    }
+
+    const walletAddress = state;
+    const normalizedAddress = walletAddress.toLowerCase().trim();
+
+    console.log(`[Twitter Callback] Received callback for wallet: ${normalizedAddress}`);
     console.log(`[Twitter Callback] OAuth token present: ${!!oauth_token}, OAuth verifier present: ${!!oauth_verifier}`);
 
     if (!oauth_token || !oauth_verifier) {
@@ -211,7 +223,6 @@ router.get('/:walletAddress/twitter-callback', async (req, res) => {
     }
 
     // Retrieve the stored oauth_token_secret from the database
-    const normalizedAddress = walletAddress.toLowerCase().trim();
     const user = await User.findOne({ walletAddress: normalizedAddress });
     
     if (!user || !user.oauthTokenSecret || user.oauthToken !== oauth_token) {
