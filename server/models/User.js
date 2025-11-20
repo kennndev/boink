@@ -26,6 +26,14 @@ const userSchema = new mongoose.Schema({
     type: String,
     default: null
   },
+  oauthTokenSecret: {
+    type: String,
+    default: null
+  },
+  oauthToken: {
+    type: String,
+    default: null
+  },
   referralUsed: {
     type: Boolean,
     default: false
