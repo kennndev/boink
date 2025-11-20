@@ -4,6 +4,114 @@ import { getTwitterOAuthUrl, verifyFollowAfterOAuth } from '../utils/twitterVeri
 
 const router = express.Router();
 
+// Twitter OAuth callback (MUST be before /:walletAddress route to avoid route conflicts)
+router.get('/twitter-callback', async (req, res) => {
+  try {
+    const { oauth_token, oauth_verifier, state } = req.query;
+
+    // Get wallet address from state parameter (passed during OAuth initiation)
+    if (!state) {
+      console.error('[Twitter Callback] No wallet address in state parameter');
+      const frontendUrl = process.env.FRONTEND_URL || (req.headers.origin || 'http://localhost:5173');
+      return res.redirect(`${frontendUrl}?twitter_error=missing_wallet`);
+    }
+
+    const walletAddress = state;
+    const normalizedAddress = walletAddress.toLowerCase().trim();
+
+    console.log(`[Twitter Callback] Received callback for wallet: ${normalizedAddress}`);
+    console.log(`[Twitter Callback] OAuth token present: ${!!oauth_token}, OAuth verifier present: ${!!oauth_verifier}`);
+
+    if (!oauth_token || !oauth_verifier) {
+      console.error('[Twitter Callback] Missing OAuth parameters');
+      const frontendUrl = process.env.FRONTEND_URL || (req.headers.origin || 'http://localhost:5173');
+      return res.redirect(`${frontendUrl}?twitter_error=missing_params`);
+    }
+
+    // Retrieve the stored oauth_token_secret from the database
+    const user = await User.findOne({ walletAddress: normalizedAddress });
+    
+    if (!user || !user.oauthTokenSecret || user.oauthToken !== oauth_token) {
+      console.error('[Twitter Callback] OAuth token mismatch or user not found');
+      console.error('[Twitter Callback] User found:', !!user);
+      console.error('[Twitter Callback] Has token secret:', !!user?.oauthTokenSecret);
+      console.error('[Twitter Callback] Token matches:', user?.oauthToken === oauth_token);
+      const frontendUrl = process.env.FRONTEND_URL || (req.headers.origin || 'http://localhost:5173');
+      return res.redirect(`${frontendUrl}?twitter_error=invalid_token`);
+    }
+
+    console.log(`[Twitter Callback] Verifying follow for wallet ${normalizedAddress}`);
+    
+    // Now verify the follow using the stored secret
+    // This will authenticate the USER's Twitter account (not the app owner's)
+    const verification = await verifyFollowAfterOAuth(
+      oauth_token,
+      oauth_verifier,
+      user.oauthTokenSecret
+    );
+    
+    console.log(`[Twitter Callback] Verification result:`, {
+      isFollowing: verification.isFollowing,
+      twitterUserId: verification.twitterUserId
+    });
+    
+    // Clear OAuth tokens immediately after use (security best practice)
+    user.oauthToken = null;
+    user.oauthTokenSecret = null;
+    
+    if (!verification.isFollowing) {
+      console.log(`[Twitter Callback] User ${normalizedAddress} (Twitter ID: ${verification.twitterUserId}) is not following`);
+      await user.save();
+      const frontendUrl = process.env.FRONTEND_URL || (req.headers.origin || 'http://localhost:5173');
+      return res.redirect(`${frontendUrl}?twitter_error=not_following`);
+    }
+
+    // User is following, award points
+    const POINTS_PER_TWITTER_FOLLOW = 10;
+
+    // Check if user already followed (prevent duplicate rewards for this wallet)
+    if (user.twitterFollowed) {
+      console.log(`[Twitter Callback] User ${normalizedAddress} already claimed Twitter follow points`);
+      await user.save();
+      const frontendUrl = process.env.FRONTEND_URL || (req.headers.origin || 'http://localhost:5173');
+      return res.redirect(`${frontendUrl}?twitter_error=already_claimed`);
+    }
+
+    // IMPORTANT: Check if this Twitter account has already been used by another wallet
+    // This prevents users from using the same Twitter account to claim points for multiple wallets
+    const existingUserWithTwitterId = await User.findOne({ 
+      twitterUserId: verification.twitterUserId,
+      walletAddress: { $ne: normalizedAddress } // Exclude the current wallet
+    });
+
+    if (existingUserWithTwitterId) {
+      console.log(`[Twitter Callback] Twitter account ${verification.twitterUserId} (@${verification.twitterUsername}) already used by wallet ${existingUserWithTwitterId.walletAddress}`);
+      await user.save();
+      const frontendUrl = process.env.FRONTEND_URL || (req.headers.origin || 'http://localhost:5173');
+      return res.redirect(`${frontendUrl}?twitter_error=twitter_already_used`);
+    }
+
+    // Award points and mark as followed
+    // Store the Twitter user ID to prevent duplicate claims from same Twitter account across different wallets
+    user.points += POINTS_PER_TWITTER_FOLLOW;
+    user.twitterFollowed = true;
+    user.twitterUserId = verification.twitterUserId; // Store the authenticated USER's Twitter ID
+    await user.save();
+
+    console.log(`[Twitter Callback] Successfully awarded ${POINTS_PER_TWITTER_FOLLOW} points to wallet ${normalizedAddress}`);
+    console.log(`[Twitter Callback] User's Twitter ID: ${verification.twitterUserId}`);
+    console.log(`[Twitter Callback] Total points: ${user.points}`);
+
+    const frontendUrl = process.env.FRONTEND_URL || (req.headers.origin || 'http://localhost:5173');
+    return res.redirect(`${frontendUrl}?twitter_success=true&points=${user.points}`);
+  } catch (error) {
+    console.error('[Twitter Callback] Error in Twitter OAuth callback:', error);
+    console.error('[Twitter Callback] Error stack:', error.stack);
+    const frontendUrl = process.env.FRONTEND_URL || (req.headers.origin || 'http://localhost:5173');
+    return res.redirect(`${frontendUrl}?twitter_error=verification_failed`);
+  }
+});
+
 // Get or create user
 router.get('/:walletAddress', async (req, res) => {
   try {
@@ -195,114 +303,6 @@ router.get('/:walletAddress/twitter-oauth', async (req, res) => {
       trustBased: true,
       error: error.message
     });
-  }
-});
-
-// Twitter OAuth callback (single endpoint - wallet address passed via state parameter)
-router.get('/twitter-callback', async (req, res) => {
-  try {
-    const { oauth_token, oauth_verifier, state } = req.query;
-
-    // Get wallet address from state parameter (passed during OAuth initiation)
-    if (!state) {
-      console.error('[Twitter Callback] No wallet address in state parameter');
-      const frontendUrl = process.env.FRONTEND_URL || (req.headers.origin || 'http://localhost:5173');
-      return res.redirect(`${frontendUrl}?twitter_error=missing_wallet`);
-    }
-
-    const walletAddress = state;
-    const normalizedAddress = walletAddress.toLowerCase().trim();
-
-    console.log(`[Twitter Callback] Received callback for wallet: ${normalizedAddress}`);
-    console.log(`[Twitter Callback] OAuth token present: ${!!oauth_token}, OAuth verifier present: ${!!oauth_verifier}`);
-
-    if (!oauth_token || !oauth_verifier) {
-      console.error('[Twitter Callback] Missing OAuth parameters');
-      const frontendUrl = process.env.FRONTEND_URL || (req.headers.origin || 'http://localhost:5173');
-      return res.redirect(`${frontendUrl}?twitter_error=missing_params`);
-    }
-
-    // Retrieve the stored oauth_token_secret from the database
-    const user = await User.findOne({ walletAddress: normalizedAddress });
-    
-    if (!user || !user.oauthTokenSecret || user.oauthToken !== oauth_token) {
-      console.error('[Twitter Callback] OAuth token mismatch or user not found');
-      console.error('[Twitter Callback] User found:', !!user);
-      console.error('[Twitter Callback] Has token secret:', !!user?.oauthTokenSecret);
-      console.error('[Twitter Callback] Token matches:', user?.oauthToken === oauth_token);
-      const frontendUrl = process.env.FRONTEND_URL || (req.headers.origin || 'http://localhost:5173');
-      return res.redirect(`${frontendUrl}?twitter_error=invalid_token`);
-    }
-
-    console.log(`[Twitter Callback] Verifying follow for wallet ${normalizedAddress}`);
-    
-    // Now verify the follow using the stored secret
-    // This will authenticate the USER's Twitter account (not the app owner's)
-    const verification = await verifyFollowAfterOAuth(
-      oauth_token,
-      oauth_verifier,
-      user.oauthTokenSecret
-    );
-    
-    console.log(`[Twitter Callback] Verification result:`, {
-      isFollowing: verification.isFollowing,
-      twitterUserId: verification.twitterUserId
-    });
-    
-    // Clear OAuth tokens immediately after use (security best practice)
-    user.oauthToken = null;
-    user.oauthTokenSecret = null;
-    
-    if (!verification.isFollowing) {
-      console.log(`[Twitter Callback] User ${normalizedAddress} (Twitter ID: ${verification.twitterUserId}) is not following`);
-      await user.save();
-      const frontendUrl = process.env.FRONTEND_URL || (req.headers.origin || 'http://localhost:5173');
-      return res.redirect(`${frontendUrl}?twitter_error=not_following`);
-    }
-
-    // User is following, award points
-    const POINTS_PER_TWITTER_FOLLOW = 10;
-
-    // Check if user already followed (prevent duplicate rewards for this wallet)
-    if (user.twitterFollowed) {
-      console.log(`[Twitter Callback] User ${normalizedAddress} already claimed Twitter follow points`);
-      await user.save();
-      const frontendUrl = process.env.FRONTEND_URL || (req.headers.origin || 'http://localhost:5173');
-      return res.redirect(`${frontendUrl}?twitter_error=already_claimed`);
-    }
-
-    // IMPORTANT: Check if this Twitter account has already been used by another wallet
-    // This prevents users from using the same Twitter account to claim points for multiple wallets
-    const existingUserWithTwitterId = await User.findOne({ 
-      twitterUserId: verification.twitterUserId,
-      walletAddress: { $ne: normalizedAddress } // Exclude the current wallet
-    });
-
-    if (existingUserWithTwitterId) {
-      console.log(`[Twitter Callback] Twitter account ${verification.twitterUserId} (@${verification.twitterUsername}) already used by wallet ${existingUserWithTwitterId.walletAddress}`);
-      await user.save();
-      const frontendUrl = process.env.FRONTEND_URL || (req.headers.origin || 'http://localhost:5173');
-      return res.redirect(`${frontendUrl}?twitter_error=twitter_already_used`);
-    }
-
-    // Award points and mark as followed
-    // Store the Twitter user ID to prevent duplicate claims from same Twitter account across different wallets
-    user.points += POINTS_PER_TWITTER_FOLLOW;
-    user.twitterFollowed = true;
-    user.twitterUserId = verification.twitterUserId; // Store the authenticated USER's Twitter ID
-    await user.save();
-
-    console.log(`[Twitter Callback] Successfully awarded ${POINTS_PER_TWITTER_FOLLOW} points to wallet ${normalizedAddress}`);
-    console.log(`[Twitter Callback] User's Twitter ID: ${verification.twitterUserId}`);
-    console.log(`[Twitter Callback] Total points: ${user.points}`);
-
-    const frontendUrl = process.env.FRONTEND_URL || (req.headers.origin || 'http://localhost:5173');
-    return res.redirect(`${frontendUrl}?twitter_success=true&points=${user.points}`);
-  } catch (error) {
-    console.error('[Twitter Callback] Error in Twitter OAuth callback:', error);
-    console.error('[Twitter Callback] Error stack:', error.stack);
-    const frontendUrl = process.env.FRONTEND_URL || (req.headers.origin || 'http://localhost:5173');
-    return res.redirect(`${frontendUrl}?twitter_error=verification_failed`);
   }
 });
 
