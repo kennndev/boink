@@ -59,15 +59,26 @@ export async function verifyTwitterFollow(userTwitterId, targetUsername = 'boink
  */
 export async function getTwitterOAuthUrl(callbackUrl) {
   try {
+    // Validate credentials
+    if (!process.env.TWITTER_CLIENT_ID || !process.env.TWITTER_CLIENT_SECRET) {
+      throw new Error('Twitter API credentials not configured');
+    }
+
     const client = new TwitterApi({
       appKey: process.env.TWITTER_CLIENT_ID,
       appSecret: process.env.TWITTER_CLIENT_SECRET,
     });
 
+    console.log('Generating Twitter OAuth link with callback:', callbackUrl);
+    
     const { url, oauth_token, oauth_token_secret } = await client.generateAuthLink(
       callbackUrl,
       { linkMode: 'authorize' }
     );
+
+    if (!url || !oauth_token || !oauth_token_secret) {
+      throw new Error('Failed to generate OAuth link - missing required data');
+    }
 
     return {
       url,
@@ -76,6 +87,11 @@ export async function getTwitterOAuthUrl(callbackUrl) {
     };
   } catch (error) {
     console.error('Error generating Twitter OAuth URL:', error);
+    console.error('Error details:', {
+      message: error.message,
+      code: error.code,
+      stack: error.stack
+    });
     throw error;
   }
 }
