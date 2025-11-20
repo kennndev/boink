@@ -6,6 +6,7 @@ import { awardFlipPoints, getUser } from "@/lib/api";
 
 interface CoinFlipProps {
   connectedWallet: string | null;
+  connectedWalletName?: string | null;
   walletProviders: Record<string, any>;
 }
 
@@ -14,7 +15,7 @@ interface UserStats {
   wins: number;
 }
 
-export const CoinFlip = ({ connectedWallet, walletProviders }: CoinFlipProps) => {
+export const CoinFlip = ({ connectedWallet, connectedWalletName, walletProviders }: CoinFlipProps) => {
   const [selectedSide, setSelectedSide] = useState<"heads" | "tails" | null>(null);
   const [isFlipping, setIsFlipping] = useState(false);
   const [showAnimation, setShowAnimation] = useState(false);
@@ -49,8 +50,11 @@ export const CoinFlip = ({ connectedWallet, walletProviders }: CoinFlipProps) =>
   const isUsdcConfigured = USDC_ADDRESS && USDC_ADDRESS !== "0x0000000000000000000000000000000000000000";
 
   useEffect(() => {
-    if (connectedWallet && walletProviders[connectedWallet] && isContractConfigured) {
-      const ethereumProvider = walletProviders[connectedWallet];
+    // Use wallet name to get provider, or try to find it by checking window.ethereum
+    const walletName = connectedWalletName || "MetaMask"; // Default to MetaMask if not specified
+    const ethereumProvider = walletProviders[walletName] || (window as any).ethereum;
+    
+    if (connectedWallet && ethereumProvider && isContractConfigured) {
       const browserProvider = new ethers.BrowserProvider(ethereumProvider);
       setProvider(browserProvider);
 
@@ -370,17 +374,45 @@ export const CoinFlip = ({ connectedWallet, walletProviders }: CoinFlipProps) =>
   };
 
   const handleFlip = async () => {
+    // Debug logging
+    console.log('Flip button clicked', {
+      isContractConfigured,
+      contract: !!contract,
+      provider: !!provider,
+      selectedSide,
+      hasAmountFlip,
+      isUsdcConfigured,
+      usdcContract: !!usdcContract
+    });
 
-    
     if (!isContractConfigured) {
+      toast({
+        variant: "destructive",
+        title: "Contract Not Configured",
+        description: "CoinFlip contract address is not set. Please check your environment variables.",
+      });
       return;
     }
     
     if (!contract || !provider || !selectedSide) {
+      toast({
+        variant: "destructive",
+        title: "Missing Requirements",
+        description: !selectedSide 
+          ? "Please select heads or tails first" 
+          : !contract || !provider 
+          ? "Please connect your wallet first" 
+          : "Something went wrong. Please try again.",
+      });
       return;
     }
 
     if (hasAmountFlip && (!isUsdcConfigured || !usdcContract)) {
+      toast({
+        variant: "destructive",
+        title: "USDC Not Configured",
+        description: "USDC contract address is not set. Please check your environment variables.",
+      });
       return;
     }
 
