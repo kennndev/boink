@@ -305,10 +305,12 @@ export async function verifyFollowAfterOAuth(oauthToken, oauthVerifier, oauthTok
     // Get the authenticated USER's Twitter ID (the person who clicked "Verify")
     // This will be DIFFERENT for each user who authenticates
     // User A gets their Twitter ID, User B gets their Twitter ID, etc.
+    // Use v1.1 API to avoid requiring Project attachment (v2 API requires Project)
     console.log('[Twitter Verification] Getting authenticated user info...');
-    const me = await loggedClient.v2.me();
-    const userId = me.data.id; // This is the USER's Twitter ID, not the app owner's!
-    const username = me.data.username;
+    const v1Client = loggedClient.v1; // Access v1.1 API (doesn't require Project attachment)
+    const account = await v1Client.verifyCredentials();
+    const userId = account.id_str; // This is the USER's Twitter ID, not the app owner's!
+    const username = account.screen_name;
     
     console.log(`[Twitter Verification] Authenticated as Twitter user: @${username} (ID: ${userId})`);
     console.log(`[Twitter Verification] This is the USER's account, not the app owner's account`);
@@ -317,10 +319,9 @@ export async function verifyFollowAfterOAuth(oauthToken, oauthVerifier, oauthTok
     const targetUsername = process.env.TWITTER_TARGET_USERNAME || 'boinknfts';
     console.log(`[Twitter Verification] Checking if @${username} is following @${targetUsername}...`);
     
-    // Use the more efficient friendships/show endpoint (v1.1) to directly check follow status
-    // This is better than fetching the entire following list
+    // Use the friendships/show endpoint (v1.1) to directly check follow status
+    // This endpoint doesn't require Project attachment and is more efficient
     try {
-      const v1Client = loggedClient.v1; // Access v1.1 API
       const relationship = await v1Client.friendship({
         source_id: userId,
         target_screen_name: targetUsername,
@@ -339,35 +340,25 @@ export async function verifyFollowAfterOAuth(oauthToken, oauthVerifier, oauthTok
         accessSecret,
       };
     } catch (friendshipError) {
-      // Fallback to v2 API if v1.1 endpoint fails
-      console.warn('[Twitter Verification] friendships/show failed, falling back to v2 following list:', friendshipError.message);
-      
-      const targetUser = await loggedClient.v2.userByUsername(targetUsername);
-      const targetUserId = targetUser.data.id;
-      console.log(`[Twitter Verification] Target account @${targetUsername} has ID: ${targetUserId}`);
-
-      // Check if the authenticated USER is following the target account
-      // This checks the USER's following list, not the app owner's
-      // Each user's following list is checked independently
-      console.log(`[Twitter Verification] Fetching following list for user @${username}...`);
-      const following = await loggedClient.v2.following(userId, {
-        max_results: 1000,
+      // If friendships/show fails, provide detailed error
+      console.error('[Twitter Verification] friendships/show endpoint failed:', friendshipError.message);
+      console.error('[Twitter Verification] Error details:', {
+        code: friendshipError.code,
+        data: friendshipError.data
       });
-
-      // Verify if the target account is in the user's following list
-      const isFollowing = following.data?.some(
-        (user) => user.id === targetUserId
-      );
-
-      console.log(`[Twitter Verification] Result: @${username} ${isFollowing ? 'IS' : 'IS NOT'} following @${targetUsername}`);
       
-      return {
-        isFollowing,
-        twitterUserId: userId,
-        twitterUsername: username,
-        accessToken,
-        accessSecret,
-      };
+      // Provide helpful error message
+      if (friendshipError.code === 403) {
+        throw new Error(
+          'Twitter API access denied. Please check:\n' +
+          '1. Your Twitter App has "Read" or "Read and Write" permissions\n' +
+          '2. OAuth 1.0a is enabled in your Twitter App settings\n' +
+          '3. The user has authorized your app with the correct permissions\n' +
+          `Original error: ${friendshipError.message}`
+        );
+      }
+      
+      throw new Error(`Failed to verify follow status: ${friendshipError.message}`);
     }
   } catch (error) {
     console.error('[Twitter Verification] Error verifying follow after OAuth:', error);
