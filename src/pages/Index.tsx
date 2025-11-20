@@ -75,7 +75,8 @@ const Index = () => {
         'already_claimed': 'You have already claimed Twitter follow points for this wallet!',
         'twitter_already_used': 'This Twitter account has already been used to claim points for another wallet. Each Twitter account can only be used once.',
         'verification_failed': 'Twitter verification failed. Please try again.',
-        'missing_params': 'Invalid Twitter callback. Please try again.'
+        'missing_params': 'Invalid Twitter callback. Please try again.',
+        'missing_wallet': 'Wallet address missing in callback. Please try again.'
       };
       toast({
         variant: "destructive",
