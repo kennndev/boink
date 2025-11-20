@@ -82,16 +82,23 @@ router.post('/:walletAddress/flip', async (req, res) => {
 router.get('/:walletAddress/twitter-oauth', async (req, res) => {
   try {
     const { walletAddress } = req.params;
-    const callbackUrl = `${req.protocol}://${req.get('host')}/api/users/${walletAddress}/twitter-callback`;
-
+    
     // Check if Twitter API is configured
     if (!process.env.TWITTER_CLIENT_ID || !process.env.TWITTER_CLIENT_SECRET) {
+      console.log('Twitter API not configured - returning trust-based response');
       return res.json({
         success: false,
         message: 'Twitter API not configured. Using trust-based system.',
         trustBased: true
       });
     }
+
+    // Build callback URL - handle both Vercel and local development
+    const protocol = req.protocol || 'https';
+    const host = req.get('host') || req.headers.host;
+    const callbackUrl = `${protocol}://${host}/api/users/${walletAddress}/twitter-callback`;
+    
+    console.log('Generating Twitter OAuth URL with callback:', callbackUrl);
 
     const oauthData = await getTwitterOAuthUrl(callbackUrl);
     
@@ -105,10 +112,12 @@ router.get('/:walletAddress/twitter-oauth', async (req, res) => {
     });
   } catch (error) {
     console.error('Error generating Twitter OAuth URL:', error);
+    console.error('Error stack:', error.stack);
     res.status(500).json({
       success: false,
       message: 'Failed to generate OAuth URL',
-      error: error.message
+      error: error.message,
+      details: process.env.NODE_ENV === 'development' ? error.stack : undefined
     });
   }
 });
