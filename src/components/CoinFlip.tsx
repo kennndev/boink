@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import React, { useState, useEffect } from "react";
 import { ethers } from "ethers";
 import { useToast } from "@/hooks/use-toast";
 import coinFlipABI from "../coinFlip.json";
@@ -657,15 +657,17 @@ export const CoinFlip = ({ connectedWallet, connectedWalletName, walletProviders
         <h3 className="text-lg font-bold font-military text-gradient-blue mb-3">
           Your Stats
         </h3>
-        {/* Points Display */}
-        {connectedWallet && (
+        {/* Points Display - Hidden */}
+        {/* 
+        {connectedWallet ? (
           <div className="mb-3 p-2 bg-gradient-to-r from-yellow-100 to-yellow-50 win98-border">
             <div className="flex items-center justify-between">
               <span className="text-sm font-pixel text-gray-700">💰 Points:</span>
               <span className="text-lg font-bold font-military text-gradient-yellow">{userPoints}</span>
             </div>
           </div>
-        )}
+        ) : null}
+        */}
         {/* Bet amount picker */}
         <div className="mb-4">
           <div className="text-sm font-retro text-gray-700 mb-2">Choose Bet (USDC)</div>
