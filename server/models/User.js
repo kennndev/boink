@@ -24,7 +24,8 @@ const userSchema = new mongoose.Schema({
   },
   twitterUserId: {
     type: String,
-    default: null
+    default: null,
+    index: true // Index for faster lookups to prevent duplicate Twitter accounts
   },
   oauthTokenSecret: {
     type: String,
