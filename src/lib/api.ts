@@ -68,9 +68,37 @@ export async function awardFlipPoints(walletAddress: string): Promise<{ success:
 /**
  * Get Twitter OAuth URL for verification
  */
-export async function getTwitterOAuthUrl(walletAddress: string): Promise<{ success: boolean; oauthUrl?: string; requiresOAuth?: boolean; trustBased?: boolean; message?: string }> {
+export async function getTwitterOAuthUrl(walletAddress: string): Promise<{ success: boolean; oauthUrl?: string; requiresOAuth?: boolean; trustBased?: boolean; message?: string; error?: string }> {
   try {
     const response = await fetch(`${API_BASE_URL}/users/${walletAddress}/twitter-oauth`);
+    
+    if (!response.ok) {
+      // Try to parse error response
+      let errorData;
+      try {
+        errorData = await response.json();
+      } catch {
+        errorData = { message: `Server error: ${response.status} ${response.statusText}` };
+      }
+      
+      console.error('Twitter OAuth API error:', response.status, errorData);
+      
+      // If Twitter API is not configured, return trust-based response
+      if (response.status === 500 && errorData.message?.includes('not configured')) {
+        return {
+          success: false,
+          trustBased: true,
+          message: 'Twitter API not configured. Using trust-based system.'
+        };
+      }
+      
+      return {
+        success: false,
+        message: errorData.message || `Failed to get OAuth URL: ${response.status}`,
+        error: errorData.error
+      };
+    }
+    
     const data = await response.json();
     return {
       success: data.success,
@@ -83,7 +111,7 @@ export async function getTwitterOAuthUrl(walletAddress: string): Promise<{ succe
     console.error('Error getting Twitter OAuth URL:', error);
     return {
       success: false,
-      message: 'Failed to get OAuth URL'
+      message: error instanceof Error ? error.message : 'Failed to get OAuth URL'
     };
   }
 }
