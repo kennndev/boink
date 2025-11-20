@@ -817,7 +817,8 @@ const Index = () => {
           <div className="space-y-2 sm:space-y-4">
             {connectedWallet ? (
               <Referral 
-                connectedWallet={connectedWallet} 
+                connectedWallet={connectedWallet}
+                connectedWalletName={connectedWalletName}
                 walletProviders={walletProviders}
                 pendingRefCode={pendingRefCode}
                 onRefCodeUsed={() => {
