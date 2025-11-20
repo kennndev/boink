@@ -2,6 +2,7 @@ import { useState, useEffect } from "react";
 import { ethers } from "ethers";
 import { useToast } from "@/hooks/use-toast";
 import coinFlipABI from "../coinFlip.json";
+import { awardFlipPoints, getUser } from "@/lib/api";
 
 interface CoinFlipProps {
   connectedWallet: string | null;
@@ -35,6 +36,7 @@ export const CoinFlip = ({ connectedWallet, walletProviders }: CoinFlipProps) =>
   const [maxBetUnits, setMaxBetUnits] = useState<bigint | null>(null);
   const [networkError, setNetworkError] = useState<string | null>(null);
   const [contractExists, setContractExists] = useState<boolean>(false);
+  const [userPoints, setUserPoints] = useState<number>(0);
   const { toast } = useToast();
 
   // Contract addresses
@@ -154,6 +156,18 @@ export const CoinFlip = ({ connectedWallet, walletProviders }: CoinFlipProps) =>
           
           // Load user stats
           loadUserStats(coinFlipContract);
+          
+          // Load user points
+          if (connectedWallet) {
+            try {
+              const userData = await getUser(connectedWallet);
+              if (userData) {
+                setUserPoints(userData.points);
+              }
+            } catch (error) {
+              console.error('Error loading user points:', error);
+            }
+          }
           
           // Detect contract capabilities
           try {
@@ -533,6 +547,23 @@ export const CoinFlip = ({ connectedWallet, walletProviders }: CoinFlipProps) =>
         // Update stats
         await loadUserStats(contract);
         
+        // Award points for coin flip
+        if (ownerAddress) {
+          try {
+            const pointsResult = await awardFlipPoints(ownerAddress);
+            if (pointsResult.success && pointsResult.points !== undefined) {
+              setUserPoints(pointsResult.points);
+              toast({
+                title: "🎉 Points Awarded!",
+                description: `You earned ${pointsResult.pointsAwarded} points! Total: ${pointsResult.points} points`,
+              });
+            }
+          } catch (error) {
+            console.error('Error awarding points:', error);
+            // Don't show error toast for points, as flip was successful
+          }
+        }
+        
         const winDesc = hasAmountFlip
           ? (won ? `Payout: ${payoutTotal ? ethers.formatUnits(payoutTotal, usdcDecimals) : expectedPayout} USDC` : `You guessed ${currentGuess}, outcome was ${outcomeSide}`)
           : `You guessed ${currentGuess}, outcome was ${outcomeSide}`;
@@ -594,6 +625,15 @@ export const CoinFlip = ({ connectedWallet, walletProviders }: CoinFlipProps) =>
         <h3 className="text-lg font-bold font-military text-gradient-blue mb-3">
           Your Stats
         </h3>
+        {/* Points Display */}
+        {connectedWallet && (
+          <div className="mb-3 p-2 bg-gradient-to-r from-yellow-100 to-yellow-50 win98-border">
+            <div className="flex items-center justify-between">
+              <span className="text-sm font-pixel text-gray-700">💰 Points:</span>
+              <span className="text-lg font-bold font-military text-gradient-yellow">{userPoints}</span>
+            </div>
+          </div>
+        )}
         {/* Bet amount picker */}
         <div className="mb-4">
           <div className="text-sm font-retro text-gray-700 mb-2">Choose Bet (USDC)</div>
