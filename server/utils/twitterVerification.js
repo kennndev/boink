@@ -324,18 +324,16 @@ export async function verifyFollowAfterOAuth(oauthToken, oauthVerifier, oauthTok
     const targetUsername = process.env.TWITTER_TARGET_USERNAME || 'boinknfts';
     console.log(`[Twitter Verification] Checking if @${username} is following @${targetUsername}...`);
     
-    // Use the friendships/show endpoint (v1.1) to directly check follow status
-    // This endpoint doesn't require Project attachment and is more efficient
+    // SIMPLEST METHOD: Use friendships/show endpoint to directly check if user follows @boinknfts
+    // This gives us a direct yes/no answer - perfect for our use case
     // Documentation: https://developer.twitter.com/en/docs/twitter-api/v1/accounts-and-users/follow-search-get-users/api-reference/get-friendships-show
-    // This endpoint requires OAuth 1.0a User Context (which we have via loggedClient)
+    // Requires: OAuth 1.0a User Context (which we have) + Elevated access level
     try {
       // Try different possible method names for friendships/show endpoint
-      // The twitter-api-v2 library may use different method names
       let relationship;
       try {
         // Method 1: Direct API call (most reliable)
-        // Endpoint: GET /1.1/friendships/show.json
-        // Parameters: source_id (or source_screen_name) and target_screen_name (or target_id)
+        // This directly tells us: "Does user A follow user B?" - exactly what we need!
         relationship = await v1Client.get('friendships/show.json', {
           source_id: userId,
           target_screen_name: targetUsername,
@@ -350,16 +348,16 @@ export async function verifyFollowAfterOAuth(oauthToken, oauthVerifier, oauthTok
         } catch (methodError2) {
           // Method 3: friendship (alternative method name)
           relationship = await v1Client.friendship({
-            source_id: userId,
-            target_screen_name: targetUsername,
-          });
+        source_id: userId,
+        target_screen_name: targetUsername,
+      });
         }
       }
 
-      // Check if the source user (authenticated user) is following the target
+      // Simple check: Does the authenticated user follow @boinknfts?
       const isFollowing = relationship.relationship?.source?.following === true;
       
-      console.log(`[Twitter Verification] Result: @${username} ${isFollowing ? 'IS' : 'IS NOT'} following @${targetUsername}`);
+      console.log(`[Twitter Verification] ✅ Result: @${username} ${isFollowing ? 'IS' : 'IS NOT'} following @${targetUsername}`);
       
       return {
         isFollowing,
@@ -378,27 +376,30 @@ export async function verifyFollowAfterOAuth(oauthToken, oauthVerifier, oauthTok
         errors: friendshipError.errors
       });
       
-      // Error 453 means friendships/show endpoint is not available with current access level
-      // Fallback: Check user's following list (if available with basic access)
+      // Error 453: friendships/show endpoint not available (requires Elevated access)
+      // Fallback: Check if @boinknfts is in the user's following list
       if (friendshipError.code === 403 && friendshipError.errors?.[0]?.code === 453) {
-        console.log('[Twitter Verification] friendships/show not available (code 453), trying following list method...');
+        console.log('[Twitter Verification] friendships/show not available (code 453 - needs Elevated access)');
+        console.log('[Twitter Verification] Using fallback: Check if @boinknfts is in user\'s following list...');
         
         try {
-          // Alternative: Get target user ID and check if they're in the authenticated user's following list
-          // This method uses friends/ids endpoint which may be available with basic access
+          // FALLBACK: Get user's following list and check if @boinknfts is in it
+          // This is less efficient but works with basic access
+          
+          // Step 1: Get @boinknfts user ID
           const targetUser = await v1Client.user({ screen_name: targetUsername });
           const targetUserId = targetUser.id_str;
-          console.log(`[Twitter Verification] Target account @${targetUsername} has ID: ${targetUserId}`);
+          console.log(`[Twitter Verification] Target @${targetUsername} has ID: ${targetUserId}`);
           
-          // Get the authenticated user's following list (friends = people they follow)
-          // Note: This endpoint may have rate limits but should work with basic access
-          console.log(`[Twitter Verification] Fetching following list for user @${username}...`);
+          // Step 2: Get the authenticated user's following list
+          // friends = people the user follows
+          console.log(`[Twitter Verification] Getting following list for @${username}...`);
           const friendsIds = await v1Client.friendsIds({ user_id: userId });
           
-          // Check if target user ID is in the following list
+          // Step 3: Simple check - is @boinknfts in the list?
           const isFollowing = friendsIds.ids.includes(targetUserId);
           
-          console.log(`[Twitter Verification] Result (via following list): @${username} ${isFollowing ? 'IS' : 'IS NOT'} following @${targetUsername}`);
+          console.log(`[Twitter Verification] ✅ Result: @${username} ${isFollowing ? 'IS' : 'IS NOT'} following @${targetUsername}`);
           
           return {
             isFollowing,
@@ -408,15 +409,18 @@ export async function verifyFollowAfterOAuth(oauthToken, oauthVerifier, oauthTok
             accessSecret,
           };
         } catch (fallbackError) {
-          console.error('[Twitter Verification] Fallback method also failed:', fallbackError.message);
+          console.error('[Twitter Verification] Fallback method failed:', fallbackError.message);
+          
+          // Provide clear instructions
           throw new Error(
-            'Twitter API access level insufficient. Error 453 means friendships/show endpoint is not available.\n\n' +
-            'SOLUTIONS:\n' +
-            '1. Upgrade your Twitter API access level in the Developer Portal\n' +
-            '2. Apply for Elevated access (free) to access friendships/show endpoint\n' +
-            '3. Or use the following list method (which also failed)\n\n' +
-            `friendships/show error: ${friendshipError.message}\n` +
-            `Fallback error: ${fallbackError.message}`
+            'Cannot verify if user follows @boinknfts.\n\n' +
+            'REASON: friendships/show endpoint requires Elevated access (free upgrade available).\n\n' +
+            'QUICK FIX:\n' +
+            '1. Go to https://developer.twitter.com/en/portal/dashboard\n' +
+            '2. Apply for "Elevated" access (it\'s free!)\n' +
+            '3. Wait for approval (usually instant)\n' +
+            '4. Try again\n\n' +
+            `Error: ${fallbackError.message}`
           );
         }
       }
