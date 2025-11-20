@@ -72,7 +72,8 @@ const Index = () => {
     } else if (twitterError) {
       const errorMessages: Record<string, string> = {
         'not_following': 'Please follow @boinknfts on Twitter first!',
-        'already_claimed': 'You have already claimed Twitter follow points!',
+        'already_claimed': 'You have already claimed Twitter follow points for this wallet!',
+        'twitter_already_used': 'This Twitter account has already been used to claim points for another wallet. Each Twitter account can only be used once.',
         'verification_failed': 'Twitter verification failed. Please try again.',
         'missing_params': 'Invalid Twitter callback. Please try again.'
       };
