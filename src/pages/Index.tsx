@@ -30,6 +30,7 @@ const Index = () => {
   const [showWalletModal, setShowWalletModal] = useState(false);
   const [showWalletConnectModal, setShowWalletConnectModal] = useState(false);
   const [connectedWallet, setConnectedWallet] = useState<string | null>(null);
+  const [connectedWalletName, setConnectedWalletName] = useState<string | null>(null);
   const [blockNumber, setBlockNumber] = useState("29182283");
   const [detectedWallets, setDetectedWallets] = useState<string[]>([]);
   const [walletProviders, setWalletProviders] = useState<Record<string, EthereumProvider>>({});
@@ -257,10 +258,11 @@ const Index = () => {
           console.log("WalletConnect accounts:", wcAccounts);
 
           setWalletProviders({ ...walletProviders, WalletConnect: wcProvider as unknown as EthereumProvider });
-          // Store the actual wallet address, not "WalletConnect"
+          // Store both the wallet address and name
           const walletAddress = wcAccounts && wcAccounts.length > 0 ? wcAccounts[0] : null;
           if (walletAddress) {
             setConnectedWallet(walletAddress);
+            setConnectedWalletName("WalletConnect");
             setShowWalletModal(false);
             toast({
               title: "Wallet Connected",
@@ -313,9 +315,10 @@ const Index = () => {
         console.log('Accounts received:', accounts);
         
         if (accounts.length > 0) {
-          // Store the actual wallet address, not the wallet name
+          // Store both the wallet address and name
           const walletAddress = accounts[0];
           setConnectedWallet(walletAddress);
+          setConnectedWalletName(walletName);
           setShowWalletModal(false);
           toast({
             title: "Wallet Connected",
@@ -440,6 +443,7 @@ const Index = () => {
             {connectedWallet ? (
               <CoinFlip 
                 connectedWallet={connectedWallet} 
+                connectedWalletName={connectedWalletName}
                 walletProviders={walletProviders} 
               />
             ) : (
@@ -1115,11 +1119,12 @@ const Index = () => {
             try {
               const accounts = await provider.request({ method: "eth_accounts" });
               setWalletProviders({ ...walletProviders, WalletConnect: provider });
-              // Store the actual wallet address, not "WalletConnect"
+              // Store both the wallet address and name
               const walletAddress = accounts && accounts.length > 0 ? accounts[0] : null;
               if (walletAddress) {
                 setConnectedWallet(walletAddress);
-                setShowWalletConnectModal(false);
+                setConnectedWalletName("WalletConnect");
+                setShowWalletModal(false);
                 toast({
                   title: "Wallet Connected",
                   description: "Successfully connected via WalletConnect",
