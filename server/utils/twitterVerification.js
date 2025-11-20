@@ -64,12 +64,18 @@ export async function getTwitterOAuthUrl(callbackUrl) {
       throw new Error('Twitter API credentials not configured');
     }
 
+    // Check if credentials are empty strings
+    if (process.env.TWITTER_CLIENT_ID.trim() === '' || process.env.TWITTER_CLIENT_SECRET.trim() === '') {
+      throw new Error('Twitter API credentials are empty');
+    }
+
     const client = new TwitterApi({
-      appKey: process.env.TWITTER_CLIENT_ID,
-      appSecret: process.env.TWITTER_CLIENT_SECRET,
+      appKey: process.env.TWITTER_CLIENT_ID.trim(),
+      appSecret: process.env.TWITTER_CLIENT_SECRET.trim(),
     });
 
     console.log('Generating Twitter OAuth link with callback:', callbackUrl);
+    console.log('Using Twitter Client ID:', process.env.TWITTER_CLIENT_ID.substring(0, 10) + '...');
     
     const { url, oauth_token, oauth_token_secret } = await client.generateAuthLink(
       callbackUrl,
@@ -90,8 +96,24 @@ export async function getTwitterOAuthUrl(callbackUrl) {
     console.error('Error details:', {
       message: error.message,
       code: error.code,
+      twitterErrorCode: error.errors?.[0]?.code,
+      twitterErrorMessage: error.errors?.[0]?.message,
       stack: error.stack
     });
+    
+    // Provide helpful error messages for common issues
+    if (error.code === 401 || (error.errors && error.errors[0]?.code === 32)) {
+      const helpfulError = new Error(
+        'Twitter API authentication failed. Please check:\n' +
+        '1. TWITTER_CLIENT_ID and TWITTER_CLIENT_SECRET are correct\n' +
+        '2. Credentials are from the same Twitter App\n' +
+        '3. Twitter App has OAuth 1.0a enabled\n' +
+        '4. Callback URL is registered in Twitter App settings: ' + callbackUrl
+      );
+      helpfulError.originalError = error;
+      throw helpfulError;
+    }
+    
     throw error;
   }
 }
@@ -132,32 +154,58 @@ export async function verifyFollowAfterOAuth(oauthToken, oauthVerifier, oauthTok
     const targetUsername = process.env.TWITTER_TARGET_USERNAME || 'boinknfts';
     console.log(`[Twitter Verification] Checking if @${username} is following @${targetUsername}...`);
     
-    const targetUser = await loggedClient.v2.userByUsername(targetUsername);
-    const targetUserId = targetUser.data.id;
-    console.log(`[Twitter Verification] Target account @${targetUsername} has ID: ${targetUserId}`);
+    // Use the more efficient friendships/show endpoint (v1.1) to directly check follow status
+    // This is better than fetching the entire following list
+    try {
+      const v1Client = loggedClient.v1; // Access v1.1 API
+      const relationship = await v1Client.friendship({
+        source_id: userId,
+        target_screen_name: targetUsername,
+      });
 
-    // Check if the authenticated USER is following the target account
-    // This checks the USER's following list, not the app owner's
-    // Each user's following list is checked independently
-    console.log(`[Twitter Verification] Fetching following list for user @${username}...`);
-    const following = await loggedClient.v2.following(userId, {
-      max_results: 1000,
-    });
+      // Check if the source user (authenticated user) is following the target
+      const isFollowing = relationship.relationship?.source?.following === true;
+      
+      console.log(`[Twitter Verification] Result: @${username} ${isFollowing ? 'IS' : 'IS NOT'} following @${targetUsername}`);
+      
+      return {
+        isFollowing,
+        twitterUserId: userId,
+        twitterUsername: username,
+        accessToken,
+        accessSecret,
+      };
+    } catch (friendshipError) {
+      // Fallback to v2 API if v1.1 endpoint fails
+      console.warn('[Twitter Verification] friendships/show failed, falling back to v2 following list:', friendshipError.message);
+      
+      const targetUser = await loggedClient.v2.userByUsername(targetUsername);
+      const targetUserId = targetUser.data.id;
+      console.log(`[Twitter Verification] Target account @${targetUsername} has ID: ${targetUserId}`);
 
-    // Verify if the target account is in the user's following list
-    const isFollowing = following.data?.some(
-      (user) => user.id === targetUserId
-    );
+      // Check if the authenticated USER is following the target account
+      // This checks the USER's following list, not the app owner's
+      // Each user's following list is checked independently
+      console.log(`[Twitter Verification] Fetching following list for user @${username}...`);
+      const following = await loggedClient.v2.following(userId, {
+        max_results: 1000,
+      });
 
-    console.log(`[Twitter Verification] Result: @${username} ${isFollowing ? 'IS' : 'IS NOT'} following @${targetUsername}`);
+      // Verify if the target account is in the user's following list
+      const isFollowing = following.data?.some(
+        (user) => user.id === targetUserId
+      );
 
-    return {
-      isFollowing,
-      twitterUserId: userId,
-      twitterUsername: username,
-      accessToken,
-      accessSecret,
-    };
+      console.log(`[Twitter Verification] Result: @${username} ${isFollowing ? 'IS' : 'IS NOT'} following @${targetUsername}`);
+      
+      return {
+        isFollowing,
+        twitterUserId: userId,
+        twitterUsername: username,
+        accessToken,
+        accessSecret,
+      };
+    }
   } catch (error) {
     console.error('[Twitter Verification] Error verifying follow after OAuth:', error);
     console.error('[Twitter Verification] Error details:', {
