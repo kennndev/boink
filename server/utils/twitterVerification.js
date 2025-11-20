@@ -322,10 +322,29 @@ export async function verifyFollowAfterOAuth(oauthToken, oauthVerifier, oauthTok
     // Use the friendships/show endpoint (v1.1) to directly check follow status
     // This endpoint doesn't require Project attachment and is more efficient
     try {
-      const relationship = await v1Client.friendship({
-        source_id: userId,
-        target_screen_name: targetUsername,
-      });
+      // Try different possible method names for friendships/show endpoint
+      let relationship;
+      try {
+        // Method 1: friendshipsShow (most likely)
+        relationship = await v1Client.friendshipsShow({
+          source_id: userId,
+          target_screen_name: targetUsername,
+        });
+      } catch (methodError) {
+        // Method 2: friendship (alternative)
+        try {
+          relationship = await v1Client.friendship({
+            source_id: userId,
+            target_screen_name: targetUsername,
+          });
+        } catch (methodError2) {
+          // Method 3: Direct API call
+          relationship = await v1Client.get('friendships/show.json', {
+            source_id: userId,
+            target_screen_name: targetUsername,
+          });
+        }
+      }
 
       // Check if the source user (authenticated user) is following the target
       const isFollowing = relationship.relationship?.source?.following === true;
@@ -344,16 +363,27 @@ export async function verifyFollowAfterOAuth(oauthToken, oauthVerifier, oauthTok
       console.error('[Twitter Verification] friendships/show endpoint failed:', friendshipError.message);
       console.error('[Twitter Verification] Error details:', {
         code: friendshipError.code,
-        data: friendshipError.data
+        data: friendshipError.data,
+        errors: friendshipError.errors
       });
       
       // Provide helpful error message
       if (friendshipError.code === 403) {
         throw new Error(
-          'Twitter API access denied. Please check:\n' +
-          '1. Your Twitter App has "Read" or "Read and Write" permissions\n' +
-          '2. OAuth 1.0a is enabled in your Twitter App settings\n' +
-          '3. The user has authorized your app with the correct permissions\n' +
+          'Twitter API access denied (403). Common causes:\n' +
+          '1. Your Twitter App needs "Read" or "Read and Write" permissions\n' +
+          '2. OAuth 1.0a must be enabled in your Twitter App settings\n' +
+          '3. The user must authorize your app with the correct permissions\n' +
+          '4. Your app may need to be attached to a Project (for v2 API, but we\'re using v1.1)\n' +
+          `Original error: ${friendshipError.message}`
+        );
+      }
+      
+      if (friendshipError.code === 401) {
+        throw new Error(
+          'Twitter API authentication failed (401). Check:\n' +
+          '1. OAuth credentials are correct\n' +
+          '2. OAuth 1.0a is properly configured\n' +
           `Original error: ${friendshipError.message}`
         );
       }
