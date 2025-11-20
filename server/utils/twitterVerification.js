@@ -57,7 +57,7 @@ export async function verifyTwitterFollow(userTwitterId, targetUsername = 'boink
  * Alternative: Verify using OAuth flow
  * This requires the user to authenticate with Twitter
  */
-export async function getTwitterOAuthUrl(callbackUrl) {
+export async function getTwitterOAuthUrl(callbackUrl, state = null) {
   try {
     // Validate credentials
     if (!process.env.TWITTER_CLIENT_ID || !process.env.TWITTER_CLIENT_SECRET) {
@@ -77,9 +77,15 @@ export async function getTwitterOAuthUrl(callbackUrl) {
     console.log('Generating Twitter OAuth link with callback:', callbackUrl);
     console.log('Using Twitter Client ID:', process.env.TWITTER_CLIENT_ID.substring(0, 10) + '...');
     
+    // Generate OAuth link with optional state parameter (for passing wallet address)
+    const authOptions = { linkMode: 'authorize' };
+    if (state) {
+      authOptions.state = state;
+    }
+    
     const { url, oauth_token, oauth_token_secret } = await client.generateAuthLink(
       callbackUrl,
-      { linkMode: 'authorize' }
+      authOptions
     );
 
     if (!url || !oauth_token || !oauth_token_secret) {
