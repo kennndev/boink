@@ -252,7 +252,7 @@ router.get('/:walletAddress/twitter-callback', async (req, res) => {
     // User is following, award points
     const POINTS_PER_TWITTER_FOLLOW = 10;
 
-    // Check if user already followed (prevent duplicate rewards)
+    // Check if user already followed (prevent duplicate rewards for this wallet)
     if (user.twitterFollowed) {
       console.log(`[Twitter Callback] User ${normalizedAddress} already claimed Twitter follow points`);
       await user.save();
@@ -260,8 +260,22 @@ router.get('/:walletAddress/twitter-callback', async (req, res) => {
       return res.redirect(`${frontendUrl}?twitter_error=already_claimed`);
     }
 
+    // IMPORTANT: Check if this Twitter account has already been used by another wallet
+    // This prevents users from using the same Twitter account to claim points for multiple wallets
+    const existingUserWithTwitterId = await User.findOne({ 
+      twitterUserId: verification.twitterUserId,
+      walletAddress: { $ne: normalizedAddress } // Exclude the current wallet
+    });
+
+    if (existingUserWithTwitterId) {
+      console.log(`[Twitter Callback] Twitter account ${verification.twitterUserId} (@${verification.twitterUsername}) already used by wallet ${existingUserWithTwitterId.walletAddress}`);
+      await user.save();
+      const frontendUrl = process.env.FRONTEND_URL || (req.headers.origin || 'http://localhost:5173');
+      return res.redirect(`${frontendUrl}?twitter_error=twitter_already_used`);
+    }
+
     // Award points and mark as followed
-    // Store the Twitter user ID to prevent duplicate claims from same Twitter account
+    // Store the Twitter user ID to prevent duplicate claims from same Twitter account across different wallets
     user.points += POINTS_PER_TWITTER_FOLLOW;
     user.twitterFollowed = true;
     user.twitterUserId = verification.twitterUserId; // Store the authenticated USER's Twitter ID
