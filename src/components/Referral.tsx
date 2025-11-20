@@ -51,6 +51,32 @@ export const Referral = ({
   const REFERRAL_REGISTRY_ADDRESS = import.meta.env.VITE_REFERRAL_REGISTORY_ADDRESS || "0x6C02bb7536d71a69F3d38E448422C80445D26b0d";
   const EXPECTED_CHAIN_ID = import.meta.env.VITE_CHAIN_ID || "763373";
 
+  // Check for Twitter OAuth callback and refresh user data
+  useEffect(() => {
+    if (!connectedWallet) return;
+    
+    const urlParams = new URLSearchParams(window.location.search);
+    const twitterSuccess = urlParams.get('twitter_success');
+    const twitterError = urlParams.get('twitter_error');
+    
+    if (twitterSuccess === 'true' || twitterError) {
+      // Refresh user data after OAuth callback
+      const refreshUserData = async () => {
+        try {
+          const userData = await getUser(connectedWallet);
+          if (userData) {
+            setUserPoints(userData.points);
+            setTwitterFollowed(userData.twitterFollowed);
+          }
+        } catch (error) {
+          console.error('Error refreshing user data after OAuth:', error);
+        }
+      };
+      
+      refreshUserData();
+    }
+  }, [connectedWallet]);
+
   // Initialize contract and check user status
   useEffect(() => {
     if (!connectedWallet) {
@@ -506,25 +532,25 @@ export const Referral = ({
 
       {/* Points Display */}
       {connectedWallet && (
-        <div className="p-2 bg-gradient-to-r from-yellow-100 to-yellow-50 win98-border">
+        <div className="p-3 sm:p-2 bg-gradient-to-r from-yellow-100 to-yellow-50 win98-border">
           <div className="flex items-center justify-between">
-            <span className="text-xs sm:text-sm font-pixel text-gray-700">💰 Points:</span>
-            <span className="text-base sm:text-lg font-bold font-military text-gradient-yellow">{userPoints}</span>
+            <span className="text-sm sm:text-sm font-pixel text-gray-700">💰 Points:</span>
+            <span className="text-lg sm:text-lg font-bold font-military text-gradient-yellow">{userPoints}</span>
           </div>
         </div>
       )}
 
       <Tabs defaultValue="code" className="w-full">
-        <TabsList className="grid w-full grid-cols-2 h-auto sm:h-8 gap-1.5 sm:gap-1 p-1 sm:p-1">
+        <TabsList className="grid w-full grid-cols-2 h-auto sm:h-8 gap-2 sm:gap-1 p-1.5 sm:p-1">
           <TabsTrigger 
             value="code" 
-            className="font-pixel text-xs sm:text-sm px-1.5 sm:px-3 py-2.5 sm:py-1.5 touch-manipulation min-h-[44px] sm:min-h-0 whitespace-normal sm:whitespace-nowrap text-center leading-tight"
+            className="font-pixel text-sm sm:text-sm px-3 sm:px-3 py-3 sm:py-1.5 touch-manipulation min-h-[48px] sm:min-h-0 whitespace-normal sm:whitespace-nowrap text-center leading-tight"
           >
             Referral Code
           </TabsTrigger>
           <TabsTrigger 
             value="progress" 
-            className="font-pixel text-xs sm:text-sm px-1.5 sm:px-3 py-2.5 sm:py-1.5 touch-manipulation min-h-[44px] sm:min-h-0 whitespace-normal sm:whitespace-nowrap text-center leading-tight"
+            className="font-pixel text-sm sm:text-sm px-3 sm:px-3 py-3 sm:py-1.5 touch-manipulation min-h-[48px] sm:min-h-0 whitespace-normal sm:whitespace-nowrap text-center leading-tight"
           >
             Your Progress
           </TabsTrigger>
@@ -570,11 +596,11 @@ export const Referral = ({
 
           {/* Manual code input */}
           {!hasUsedCode && (
-            <div className="win98-border-inset p-2 sm:p-3 space-y-2">
-              <h3 className="text-xs sm:text-sm font-bold font-military text-gradient-blue">
+            <div className="win98-border-inset p-3 sm:p-3 space-y-3 sm:space-y-2">
+              <h3 className="text-sm sm:text-sm font-bold font-military text-gradient-blue">
                 Do you have a referral code?
               </h3>
-              <div className="space-y-2">
+              <div className="space-y-3 sm:space-y-2">
                 <Input
                   value={manualCode}
                   onChange={(e) => {
@@ -598,12 +624,12 @@ export const Referral = ({
                     }
                   }}
                   placeholder="Paste referral code or URL"
-                  className="font-mono text-xs sm:text-sm h-11 sm:h-8 touch-manipulation"
+                  className="font-mono text-sm sm:text-sm h-12 sm:h-9 touch-manipulation"
                 />
                 <Button
                   onClick={() => handleUseCode(manualCode)}
                   disabled={isSubmitting || !manualCode.trim()}
-                  className="w-full font-pixel text-xs sm:text-sm h-11 sm:h-8 touch-manipulation"
+                  className="w-full font-pixel text-sm sm:text-sm h-12 sm:h-9 touch-manipulation"
                 >
                   {isSubmitting ? "Processing..." : "Add Referral Code"}
                 </Button>
@@ -612,31 +638,31 @@ export const Referral = ({
           )}
 
           {/* Twitter Follow Section */}
-          <div className="win98-border-inset p-2 sm:p-3 space-y-2 bg-blue-50">
-            <h3 className="text-xs sm:text-sm font-bold font-military text-gradient-blue">
+          <div className="win98-border-inset p-3 sm:p-3 space-y-3 sm:space-y-2 bg-blue-50">
+            <h3 className="text-sm sm:text-sm font-bold font-military text-gradient-blue">
               🐦 Follow on Twitter
             </h3>
-            <p className="text-xs font-retro text-muted-foreground mb-2">
+            <p className="text-xs sm:text-xs font-retro text-muted-foreground mb-2 leading-relaxed">
               Follow us on Twitter and earn 10 points!
             </p>
             {twitterFollowed ? (
-              <div className="p-2 bg-green-100 win98-border">
-                <p className="text-xs font-retro text-green-800">
+              <div className="p-3 sm:p-2 bg-green-100 win98-border">
+                <p className="text-xs sm:text-xs font-retro text-green-800">
                   ✓ You've already claimed Twitter follow points!
                 </p>
               </div>
             ) : (
-              <div className="space-y-2">
+              <div className="space-y-3 sm:space-y-2">
                 <Button
                   onClick={() => window.open('https://x.com/boinknfts', '_blank')}
-                  className="w-full font-pixel text-xs sm:text-sm h-11 sm:h-8 touch-manipulation bg-blue-500 hover:bg-blue-600"
+                  className="w-full font-pixel text-sm sm:text-sm h-12 sm:h-9 touch-manipulation bg-blue-500 hover:bg-blue-600 text-white"
                 >
                   Open Twitter
                 </Button>
                 <Button
                   onClick={handleTwitterFollowClaim}
                   disabled={isClaimingTwitter}
-                  className="w-full font-pixel text-xs sm:text-sm h-11 sm:h-8 touch-manipulation"
+                  className="w-full font-pixel text-sm sm:text-sm h-12 sm:h-9 touch-manipulation"
                 >
                   {isClaimingTwitter ? "Verifying..." : "Verify & Claim 10 Points"}
                 </Button>
@@ -645,31 +671,31 @@ export const Referral = ({
           </div>
 
           {/* Generate code section */}
-          <div className="win98-border-inset p-2 sm:p-3 space-y-2">
-            <h3 className="text-xs sm:text-sm font-bold font-military text-gradient-purple">
+          <div className="win98-border-inset p-3 sm:p-3 space-y-3 sm:space-y-2">
+            <h3 className="text-sm sm:text-sm font-bold font-military text-gradient-purple">
               Generate Your Referral Code
             </h3>
-            <p className="text-xs font-retro text-muted-foreground mb-1">
+            <p className="text-xs sm:text-xs font-retro text-muted-foreground mb-2 sm:mb-1 leading-relaxed">
               Create your own referral code to share with others and track your referrals
             </p>
           
             {myCode ? (
-              <div className="space-y-2">
-                <div className="win98-border p-2 sm:p-3 bg-secondary">
-                  <p className="text-xs sm:text-sm font-retro text-muted-foreground mb-1.5 sm:mb-1">Your Referral Code:</p>
-                  <code className="text-[10px] sm:text-xs text-black font-mono break-all block bg-white p-2 sm:p-1.5 leading-relaxed">
+              <div className="space-y-3 sm:space-y-2">
+                <div className="win98-border p-3 sm:p-3 bg-secondary">
+                  <p className="text-sm sm:text-sm font-retro text-muted-foreground mb-2 sm:mb-1">Your Referral Code:</p>
+                  <code className="text-xs sm:text-xs text-black font-mono break-all block bg-white p-3 sm:p-2 leading-relaxed">
                     {myCode}
                   </code>
                 </div>
                 <Button
                   onClick={handleCopyCode}
                   variant="outline"
-                  className="w-full font-pixel text-xs sm:text-sm h-11 sm:h-8 touch-manipulation"
+                  className="w-full font-pixel text-sm sm:text-sm h-12 sm:h-9 touch-manipulation"
                 >
                   Copy Code
                 </Button>
                 {!isActive && (
-                  <p className="text-xs font-retro text-red-600">
+                  <p className="text-sm sm:text-xs font-retro text-red-600">
                     ⚠️ Your referral code is inactive
                   </p>
                 )}
@@ -678,7 +704,7 @@ export const Referral = ({
               <Button
                 onClick={handleGenerateCode}
                 disabled={isGenerating}
-                className="w-full font-pixel text-xs sm:text-sm h-11 sm:h-8 touch-manipulation"
+                className="w-full font-pixel text-sm sm:text-sm h-12 sm:h-9 touch-manipulation"
               >
                 {isGenerating ? "Generating..." : "Generate Referral Code"}
               </Button>
