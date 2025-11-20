@@ -10,13 +10,15 @@ import { awardReferralPoints, awardTwitterFollowPoints, getTwitterOAuthUrl, getU
 
 interface ReferralProps {
   connectedWallet: string | null;
+  connectedWalletName?: string | null;
   walletProviders: Record<string, EthereumProvider>;
   pendingRefCode?: string | null;
   onRefCodeUsed?: () => void;
 }
 
 export const Referral = ({ 
-  connectedWallet, 
+  connectedWallet,
+  connectedWalletName,
   walletProviders,
   pendingRefCode,
   onRefCodeUsed 
@@ -51,14 +53,22 @@ export const Referral = ({
 
   // Initialize contract and check user status
   useEffect(() => {
-    if (!connectedWallet || !walletProviders[connectedWallet]) {
+    if (!connectedWallet) {
       setIsLoading(false);
       return;
     }
 
     const init = async () => {
       try {
-        const ethereumProvider = walletProviders[connectedWallet];
+        // Use wallet name to get provider, or try to find it by checking window.ethereum
+        const walletName = connectedWalletName || "MetaMask"; // Default to MetaMask if not specified
+        const ethereumProvider = walletProviders[walletName] || (window as any).ethereum;
+        
+        if (!ethereumProvider) {
+          setIsLoading(false);
+          return;
+        }
+
         const browserProvider = new ethers.BrowserProvider(ethereumProvider);
         setProvider(browserProvider);
 
@@ -75,15 +85,12 @@ export const Referral = ({
           return;
         }
 
-        const accounts = await browserProvider.listAccounts();
-        if (accounts.length === 0) {
-          setIsLoading(false);
-          return;
-        }
-
-        const userAddress = accounts[0].address;
+        // Use connectedWallet directly as the address (it's already the address)
+        const userAddress = connectedWallet.toLowerCase();
         setAddress(userAddress);
-        const userSigner = await browserProvider.getSigner();
+        
+        // Get signer for the connected address
+        const userSigner = await browserProvider.getSigner(userAddress);
         setSigner(userSigner);
 
         const referralContract = new ethers.Contract(
@@ -141,7 +148,7 @@ export const Referral = ({
     };
 
     init();
-  }, [connectedWallet, walletProviders, REFERRAL_REGISTRY_ADDRESS, EXPECTED_CHAIN_ID, toast]);
+  }, [connectedWallet, connectedWalletName, walletProviders, REFERRAL_REGISTRY_ADDRESS, EXPECTED_CHAIN_ID, toast]);
 
   // Extract referral code from URL or validate code format
   const extractCode = (input: string): string | null => {
