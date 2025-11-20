@@ -38,6 +38,7 @@ export const Referral = ({
   const [totalReferrals, setTotalReferrals] = useState<number>(0);
   const [isActive, setIsActive] = useState<boolean>(false);
   const [twitterFollowed, setTwitterFollowed] = useState<boolean>(false);
+  const [twitterUserId, setTwitterUserId] = useState<string | null>(null);
   
   // Loading states
   const [isGenerating, setIsGenerating] = useState<boolean>(false);
@@ -67,6 +68,7 @@ export const Referral = ({
           if (userData) {
             setUserPoints(userData.points);
             setTwitterFollowed(userData.twitterFollowed);
+            setTwitterUserId(userData.twitterUserId || null);
           }
         } catch (error) {
           console.error('Error refreshing user data after OAuth:', error);
@@ -157,6 +159,7 @@ export const Referral = ({
           if (userData) {
             setUserPoints(userData.points);
             setTwitterFollowed(userData.twitterFollowed);
+            setTwitterUserId(userData.twitterUserId || null);
           }
         } catch (error) {
           console.error('Error loading user points:', error);
@@ -467,10 +470,19 @@ export const Referral = ({
             description: `You earned ${pointsResult.pointsAwarded} points for following on Twitter! Total: ${pointsResult.points} points`,
           });
         } else if (pointsResult.message) {
-          toast({
-            title: "Already Claimed",
-            description: pointsResult.message,
-          });
+          // If it says OAuth is required, show a clearer message
+          if (pointsResult.requiresOAuth || pointsResult.message.includes('OAuth')) {
+            toast({
+              variant: "destructive",
+              title: "OAuth Required",
+              description: "Please click 'Verify & Claim 10 Points' to authenticate with Twitter.",
+            });
+          } else {
+            toast({
+              title: "Already Claimed",
+              description: pointsResult.message,
+            });
+          }
         }
         return;
       }
@@ -645,7 +657,7 @@ export const Referral = ({
             <p className="text-xs sm:text-xs font-retro text-muted-foreground mb-2 leading-relaxed">
               Follow us on Twitter and earn 10 points!
             </p>
-            {twitterFollowed ? (
+            {twitterFollowed && twitterUserId ? (
               <div className="p-3 sm:p-2 bg-green-100 win98-border">
                 <p className="text-xs sm:text-xs font-retro text-green-800">
                   ✓ You've already claimed Twitter follow points!
