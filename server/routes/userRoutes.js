@@ -84,7 +84,10 @@ router.get('/:walletAddress/twitter-oauth', async (req, res) => {
     const { walletAddress } = req.params;
     
     // Check if Twitter API is configured
-    if (!process.env.TWITTER_CLIENT_ID || !process.env.TWITTER_CLIENT_SECRET) {
+    const hasClientId = process.env.TWITTER_CLIENT_ID && process.env.TWITTER_CLIENT_ID.trim() !== '';
+    const hasClientSecret = process.env.TWITTER_CLIENT_SECRET && process.env.TWITTER_CLIENT_SECRET.trim() !== '';
+    
+    if (!hasClientId || !hasClientSecret) {
       console.log('Twitter API not configured - returning trust-based response');
       return res.json({
         success: false,
@@ -94,30 +97,52 @@ router.get('/:walletAddress/twitter-oauth', async (req, res) => {
     }
 
     // Build callback URL - handle both Vercel and local development
-    const protocol = req.protocol || 'https';
+    const protocol = req.protocol || (req.headers['x-forwarded-proto'] || 'https');
     const host = req.get('host') || req.headers.host;
-    const callbackUrl = `${protocol}://${host}/api/users/${walletAddress}/twitter-callback`;
     
+    if (!host) {
+      console.error('Cannot determine host for callback URL');
+      return res.status(500).json({
+        success: false,
+        message: 'Cannot determine callback URL. Please check server configuration.',
+        trustBased: true // Fall back to trust-based system
+      });
+    }
+    
+    const callbackUrl = `${protocol}://${host}/api/users/${walletAddress}/twitter-callback`;
     console.log('Generating Twitter OAuth URL with callback:', callbackUrl);
 
-    const oauthData = await getTwitterOAuthUrl(callbackUrl);
-    
-    // Store oauth_token_secret temporarily (in production, use Redis or database)
-    // For now, we'll return it to the client to send back
-    res.json({
-      success: true,
-      oauthUrl: oauthData.url,
-      oauthToken: oauthData.oauth_token,
-      oauthTokenSecret: oauthData.oauth_token_secret
-    });
+    try {
+      const oauthData = await getTwitterOAuthUrl(callbackUrl);
+      
+      // Store oauth_token_secret temporarily (in production, use Redis or database)
+      // For now, we'll return it to the client to send back
+      res.json({
+        success: true,
+        oauthUrl: oauthData.url,
+        oauthToken: oauthData.oauth_token,
+        oauthTokenSecret: oauthData.oauth_token_secret
+      });
+    } catch (twitterError) {
+      // If Twitter API call fails, fall back to trust-based system
+      console.error('Twitter API error - falling back to trust-based system:', twitterError);
+      return res.json({
+        success: false,
+        message: 'Twitter API error. Using trust-based system.',
+        trustBased: true,
+        error: twitterError.message
+      });
+    }
   } catch (error) {
     console.error('Error generating Twitter OAuth URL:', error);
     console.error('Error stack:', error.stack);
-    res.status(500).json({
+    
+    // Always fall back to trust-based system instead of returning 500
+    res.json({
       success: false,
-      message: 'Failed to generate OAuth URL',
-      error: error.message,
-      details: process.env.NODE_ENV === 'development' ? error.stack : undefined
+      message: 'Failed to generate OAuth URL. Using trust-based system.',
+      trustBased: true,
+      error: error.message
     });
   }
 });
