@@ -294,7 +294,7 @@ router.post('/:walletAddress/twitter-follow', async (req, res) => {
     if (twitterConfigured) {
       return res.json({
         success: false,
-        message: 'Please use Twitter OAuth verification. Click "Verify with Twitter" button.',
+        message: 'Twitter OAuth verification is required. Please use the "Verify & Claim 10 Points" button.',
         requiresOAuth: true
       });
     }
