@@ -10,6 +10,7 @@ export interface UserData {
   flips: number;
   twitterFollowed: boolean;
   referralUsed: boolean;
+  twitterUserId?: string | null;
 }
 
 export interface ApiResponse<T> {
