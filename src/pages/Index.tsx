@@ -23,6 +23,8 @@ import { Leaderboard } from "@/components/Leaderboard";
 import { WalletConnectModal } from "@/components/WalletConnectModal";
 import { Referral } from "@/components/Referral";
 import { StartMenu } from "@/components/StartMenu";
+import LeaderboardIcon from "@/assets/site-icon/Leaderboard.png";
+import ReferralIcon from "@/assets/site-icon/Referral.png";
 
 const Index = () => {
   const [openWindow, setOpenWindow] = useState<string | null>(null);
@@ -377,11 +379,11 @@ const Index = () => {
 
   const desktopApps = [
     { icon: TrashBinIcon, label: "Trash", id: "trash" },
-    { icon: infoIcon, label: "Referral", id: "referral" },
+    { icon: ReferralIcon, label: "Referral", id: "referral" },
     { icon: PhotosAlbum, label: "Photos Album", id: "dashboard" },
     { icon: Winamp, label: "Music Player", id: "winamp" },
     { icon: infoIcon, label: "Info", id: "info" },
-    { icon: infoIcon, label: "Onchain Leaderboard", id: "leaderboard" },
+    { icon: LeaderboardIcon, label: "Onchain Leaderboard", id: "leaderboard" },
     { icon: Coinflip, label: "COINFLIP", id: "mint" },
     { icon: StakeIcon, label: "My Stake", id: "Stakes" },
   ];
