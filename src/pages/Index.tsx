@@ -3,8 +3,6 @@ import { DesktopIcon } from "@/components/DesktopIcon";
 import { Taskbar } from "@/components/Taskbar";
 import { Window } from "@/components/Window";
 import StakeIcon from "@/assets/site-icon/Stake.png";
-import LeaderboardIcon from "@/assets/site-icon/Leaderboard.png";
-import ReferralIcon from "@/assets/site-icon/Referral.png";
 import TrashBinIcon from "@/assets/site-icon/Trash-bin.png";
 import Winamp from "@/assets/site-icon/Winamp.png";
 import Coinflip from "@/assets/site-icon/Coinflip.png";
@@ -14,7 +12,10 @@ import HawaiiImage from "@/assets/photos-album/hawaii.png";
 import RioImage from "@/assets/photos-album/rio.png";
 import RomeImage from "@/assets/photos-album/rome.png";
 import ShaolinImage from "@/assets/photos-album/shaolin.png";
+import WallpaperImage from "@/assets/photos-album/wallpaper.png";
 import gambleShitImage from "@/assets/gamble-shit.png";
+import LeaderboardIcon from "@/assets/site-icon/Leaderboard.png";
+import ReferralIcon from "@/assets/site-icon/Referral.png";
 import infoIcon from "@/assets/site-icon/Info.png";
 import { useToast } from "@/hooks/use-toast";
 import { Toaster } from "@/components/ui/toaster";
@@ -23,6 +24,7 @@ import { CoinFlip } from "@/components/CoinFlip";
 import { Leaderboard } from "@/components/Leaderboard";
 import { WalletConnectModal } from "@/components/WalletConnectModal";
 import { Referral } from "@/components/Referral";
+import { StartMenu } from "@/components/StartMenu";
 
 const Index = () => {
   const [openWindow, setOpenWindow] = useState<string | null>(null);
@@ -30,6 +32,7 @@ const Index = () => {
   const [showWalletModal, setShowWalletModal] = useState(false);
   const [showWalletConnectModal, setShowWalletConnectModal] = useState(false);
   const [connectedWallet, setConnectedWallet] = useState<string | null>(null);
+  const [connectedWalletName, setConnectedWalletName] = useState<string | null>(null);
   const [blockNumber, setBlockNumber] = useState("29182283");
   const [detectedWallets, setDetectedWallets] = useState<string[]>([]);
   const [walletProviders, setWalletProviders] = useState<Record<string, EthereumProvider>>({});
@@ -40,6 +43,7 @@ const Index = () => {
   const [showImageModal, setShowImageModal] = useState<{ src: string; alt: string } | null>(null);
   const [volume, setVolume] = useState(0.7);
   const [pendingRefCode, setPendingRefCode] = useState<string | null>(null);
+  const [showStartMenu, setShowStartMenu] = useState(false);
   const { toast } = useToast();
 
   useEffect(() => {
@@ -49,6 +53,47 @@ const Index = () => {
     }, 15000);
     return () => clearInterval(interval);
   }, []);
+
+  // Handle Twitter OAuth callback
+  useEffect(() => {
+    const urlParams = new URLSearchParams(window.location.search);
+    const twitterSuccess = urlParams.get('twitter_success');
+    const twitterError = urlParams.get('twitter_error');
+    const points = urlParams.get('points');
+
+    if (twitterSuccess === 'true') {
+      toast({
+        title: "🎉 Points Awarded!",
+        description: `You earned 10 points for following on Twitter! Total: ${points} points`,
+      });
+      // Clean up URL
+      const url = new URL(window.location.href);
+      url.searchParams.delete('twitter_success');
+      url.searchParams.delete('points');
+      window.history.replaceState({}, '', url.toString());
+    } else if (twitterError) {
+      const errorMessages: Record<string, string> = {
+        'not_following': 'Please follow @boinknfts on Twitter first!',
+        'already_claimed': 'You have already claimed Twitter follow points for this wallet!',
+        'twitter_already_used': 'This Twitter account has already been used to claim points for another wallet. Each Twitter account can only be used once.',
+        'verification_failed': 'Twitter verification failed. Please try again.',
+        'api_access_denied': 'Twitter API access denied. Your app may need Elevated access. Check server logs for details.',
+        'authentication_failed': 'Twitter authentication failed. Please check your API credentials.',
+        'missing_params': 'Invalid Twitter callback. Please try again.',
+        'missing_wallet': 'Wallet address missing in callback. Please try again.',
+        'invalid_token': 'Invalid OAuth token. Please try the verification process again.'
+      };
+      toast({
+        variant: "destructive",
+        title: "Twitter Verification Failed",
+        description: errorMessages[twitterError] || 'An error occurred during verification.',
+      });
+      // Clean up URL
+      const url = new URL(window.location.href);
+      url.searchParams.delete('twitter_error');
+      window.history.replaceState({}, '', url.toString());
+    }
+  }, [toast]);
 
   // Create audio element for music player
   useEffect(() => {
@@ -220,12 +265,17 @@ const Index = () => {
           console.log("WalletConnect accounts:", wcAccounts);
 
           setWalletProviders({ ...walletProviders, WalletConnect: wcProvider as unknown as EthereumProvider });
-          setConnectedWallet("WalletConnect");
-          setShowWalletModal(false);
-          toast({
-            title: "Wallet Connected",
-            description: "Connected via WalletConnect",
-          });
+          // Store both the wallet address and name
+          const walletAddress = wcAccounts && wcAccounts.length > 0 ? wcAccounts[0] : null;
+          if (walletAddress) {
+            setConnectedWallet(walletAddress);
+            setConnectedWalletName("WalletConnect");
+            setShowWalletModal(false);
+            toast({
+              title: "Wallet Connected",
+              description: "Connected via WalletConnect",
+            });
+          }
         } catch (wcError: any) {
           console.error("WalletConnect error:", wcError);
           toast({
@@ -272,7 +322,10 @@ const Index = () => {
         console.log('Accounts received:', accounts);
         
         if (accounts.length > 0) {
-          setConnectedWallet(walletName);
+          // Store both the wallet address and name
+          const walletAddress = accounts[0];
+          setConnectedWallet(walletAddress);
+          setConnectedWalletName(walletName);
           setShowWalletModal(false);
           toast({
             title: "Wallet Connected",
@@ -397,6 +450,7 @@ const Index = () => {
             {connectedWallet ? (
               <CoinFlip 
                 connectedWallet={connectedWallet} 
+                connectedWalletName={connectedWalletName}
                 walletProviders={walletProviders} 
               />
             ) : (
@@ -770,7 +824,8 @@ const Index = () => {
           <div className="space-y-2 sm:space-y-4">
             {connectedWallet ? (
               <Referral 
-                connectedWallet={connectedWallet} 
+                connectedWallet={connectedWallet}
+                connectedWalletName={connectedWalletName}
                 walletProviders={walletProviders}
                 pendingRefCode={pendingRefCode}
                 onRefCodeUsed={() => {
@@ -971,9 +1026,9 @@ const Index = () => {
       {/* Desktop Area */}
       <main className="relative flex-1 overflow-hidden">
         {/* Desktop Icons – pinned left; tighter spacing on mobile */}
-        <div className="absolute left-1 sm:left-4 top-1 sm:top-2 bottom-12 sm:bottom-16 md:bottom-12 z-10 flex flex-row md:flex-row gap-1 sm:gap-2 md:gap-3 pointer-events-auto overflow-y-auto lg:overflow-visible pr-1 pb-2 sm:pb-0">
-          {/* Mobile: All icons in a single column */}
-          <div className="md:hidden flex flex-col gap-1 sm:gap-1 pb-4">
+        <div className="absolute left-1 sm:left-4 top-1 sm:top-2 bottom-12 z-10 flex flex-row md:flex-row gap-2 sm:gap-3 md:gap-4 pointer-events-auto lg:overflow-visible pr-1">
+          {/* Mobile: Single column - one icon per line */}
+          <div className="md:hidden flex flex-col gap-2 sm:gap-3">
             {desktopApps.map((app) => (
               <DesktopIcon
                 key={app.id}
@@ -983,8 +1038,8 @@ const Index = () => {
               />
             ))}
           </div>
-          {/* Desktop: All icons in a single vertical column */}
-          <div className="hidden md:flex flex-col gap-1 sm:gap-2 md:gap-1">
+          {/* Desktop: Single column layout */}
+          <div className="hidden md:flex flex-col sm:gap-2">
             {desktopApps.map((app) => (
               <DesktopIcon
                 key={app.id}
@@ -1053,15 +1108,25 @@ const Index = () => {
         <WalletConnectModal
           projectId="97bac2ccf2dc1d7c79854d5bc2686912"
           onClose={() => setShowWalletConnectModal(false)}
-          onConnect={(provider) => {
+          onConnect={async (provider) => {
             // Handle WalletConnect provider connection
-            setWalletProviders({ ...walletProviders, WalletConnect: provider });
-            setConnectedWallet("WalletConnect");
-            setShowWalletConnectModal(false);
-            toast({
-              title: "Wallet Connected",
-              description: "Successfully connected via WalletConnect",
-            });
+            try {
+              const accounts = await provider.request({ method: "eth_accounts" });
+              setWalletProviders({ ...walletProviders, WalletConnect: provider });
+              // Store both the wallet address and name
+              const walletAddress = accounts && accounts.length > 0 ? accounts[0] : null;
+              if (walletAddress) {
+                setConnectedWallet(walletAddress);
+                setConnectedWalletName("WalletConnect");
+                setShowWalletModal(false);
+                toast({
+                  title: "Wallet Connected",
+                  description: "Successfully connected via WalletConnect",
+                });
+              }
+            } catch (error) {
+              console.error("Error getting WalletConnect accounts:", error);
+            }
           }}
         />
       )}
@@ -1093,14 +1158,18 @@ const Index = () => {
         </div>
       )}
 
+      {/* Start Menu */}
+      {showStartMenu && (
+        <StartMenu
+          connectedWallet={connectedWallet}
+          onClose={() => setShowStartMenu(false)}
+          isOpen={showStartMenu}
+        />
+      )}
+
       {/* Taskbar */}
       <Taskbar
-        onStartClick={() => {
-          toast({
-            title: "Start Menu",
-            description: "Coming soon!",
-          });
-        }}
+        onStartClick={() => setShowStartMenu(!showStartMenu)}
         onConnectWalletClick={() => setShowWalletModal(true)}
         connectedWallet={connectedWallet}
         blockNumber={blockNumber}
