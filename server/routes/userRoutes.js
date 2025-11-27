@@ -1,6 +1,8 @@
 import express from 'express';
+import { ethers } from 'ethers';
 import { User } from '../models/User.js';
 import { getTwitterOAuthUrl, verifyFollowAfterOAuth } from '../utils/twitterVerification.js';
+import { getContractInstance, getERC20Contract } from '../utils/contractHelper.js';
 
 const router = express.Router();
 
@@ -451,6 +453,790 @@ router.get('/leaderboard/top', async (req, res) => {
     res.status(500).json({
       success: false,
       message: 'Failed to get leaderboard',
+      error: error.message
+    });
+  }
+});
+
+// Oracle endpoint to generate signature for resolving bets
+router.post('/oracle/resolve', async (req, res) => {
+  try {
+    const { betId } = req.body;
+    
+    if (!betId) {
+      return res.status(400).json({
+        success: false,
+        message: 'betId is required'
+      });
+    }
+
+    const ORACLE_PRIVATE_KEY = process.env.ORACLE_PRIVATE_KEY;
+    if (!ORACLE_PRIVATE_KEY) {
+      return res.status(500).json({
+        success: false,
+        message: 'Oracle private key not configured'
+      });
+    }
+
+    // Convert betId to BigInt (handles both string and number)
+    const betIdBigInt = BigInt(betId);
+    
+    // Generate random value (32 bytes)
+    const random = ethers.randomBytes(32);
+    
+    // Create message hash: keccak256(abi.encodePacked(betId, random))
+    // This matches the contract's: keccak256(abi.encodePacked(betId, random))
+    const messageHash = ethers.keccak256(
+      ethers.solidityPacked(['uint256', 'bytes32'], [betIdBigInt, random])
+    );
+    
+    // Sign with Ethereum message prefix (matches ECDSA.toEthSignedMessageHash)
+    // signMessage automatically adds the "\x19Ethereum Signed Message:\n32" prefix
+    const wallet = new ethers.Wallet(ORACLE_PRIVATE_KEY);
+    const signature = await wallet.signMessage(ethers.getBytes(messageHash));
+    
+    // Convert random bytes to hex string (0x prefixed)
+    const randomHex = ethers.hexlify(random);
+    
+    res.json({
+      success: true,
+      random: randomHex,
+      signature: signature
+    });
+  } catch (error) {
+    console.error('Error generating oracle signature:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to generate signature',
+      error: error.message
+    });
+  }
+});
+
+// ==================== CoinFlip Backend Routes ====================
+
+// Get contract information (max bet, decimals, token address, etc.)
+router.get('/coinflip/contract-info', async (req, res) => {
+  try {
+    const { contract, provider } = getContractInstance();
+    
+    const [maxBet, decimals, tokenAddress, oracleSigner, resolveTimeoutBlocks] = await Promise.all([
+      contract.maxBet().catch(() => null),
+      contract.decimals_().catch(() => null),
+      contract.token().catch(() => null),
+      contract.oracleSigner().catch(() => null),
+      contract.resolveTimeoutBlocks().catch(() => null)
+    ]);
+
+    // Check if contract has quotePayout function
+    let hasQuotePayout = false;
+    try {
+      contract.interface.getFunction("quotePayout(uint256)");
+      hasQuotePayout = true;
+    } catch {}
+
+    res.json({
+      success: true,
+      data: {
+        maxBet: maxBet ? maxBet.toString() : null,
+        decimals: decimals ? Number(decimals) : null,
+        tokenAddress: tokenAddress || null,
+        oracleSigner: oracleSigner || null,
+        resolveTimeoutBlocks: resolveTimeoutBlocks ? resolveTimeoutBlocks.toString() : null,
+        hasQuotePayout,
+        contractAddress: process.env.COINFLIP_ADDRESS
+      }
+    });
+  } catch (error) {
+    console.error('Error getting contract info:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to get contract information',
+      error: error.message
+    });
+  }
+});
+
+// Get user stats from the contract
+router.get('/coinflip/stats/:walletAddress', async (req, res) => {
+  try {
+    const { walletAddress } = req.params;
+    const normalizedAddress = ethers.getAddress(walletAddress.toLowerCase().trim());
+    
+    const { contract } = getContractInstance();
+    
+    const stats = await contract.stats(normalizedAddress);
+    
+    res.json({
+      success: true,
+      data: {
+        walletAddress: normalizedAddress,
+        plays: stats.plays.toString(),
+        wins: stats.wins.toString(),
+        wagered: stats.wagered.toString(),
+        paidOut: stats.paidOut.toString()
+      }
+    });
+  } catch (error) {
+    console.error('Error getting user stats:', error);
+    
+    // Handle case where stats function doesn't exist or returns error
+    if (error.code === 'CALL_EXCEPTION' || error.message?.includes('could not decode')) {
+      return res.json({
+        success: true,
+        data: {
+          walletAddress: req.params.walletAddress.toLowerCase().trim(),
+          plays: '0',
+          wins: '0',
+          wagered: '0',
+          paidOut: '0'
+        }
+      });
+    }
+    
+    res.status(500).json({
+      success: false,
+      message: 'Failed to get user stats',
+      error: error.message
+    });
+  }
+});
+
+// Get bet information by betId
+router.get('/coinflip/bet/:betId', async (req, res) => {
+  try {
+    const { betId } = req.params;
+    const betIdBigInt = BigInt(betId);
+    
+    const { contract, provider } = getContractInstance();
+    
+    const betInfo = await contract.bets(betIdBigInt);
+    
+    // Get BetResolved event if bet is resolved
+    let resolvedEvent = null;
+    if (Number(betInfo.status) === 2) { // SETTLED
+      try {
+        const currentBlock = await provider.getBlockNumber();
+        const fromBlock = Math.max(Number(betInfo.placedAtBlock) - 100, 0);
+        
+        const filter = contract.filters.BetResolved(betIdBigInt);
+        const events = await contract.queryFilter(filter, fromBlock, currentBlock);
+        
+        if (events.length > 0) {
+          const event = events[events.length - 1];
+          const parsed = contract.interface.parseLog(event);
+          resolvedEvent = {
+            betId: parsed.args[0].toString(),
+            player: parsed.args[1],
+            guess: Number(parsed.args[2]),
+            outcome: Number(parsed.args[3]),
+            won: parsed.args[4] === true || parsed.args[4] === 1n || parsed.args[4] === 1,
+            amount: parsed.args[5].toString(),
+            payout: parsed.args[6].toString(),
+            profit: parsed.args[7].toString()
+          };
+        }
+      } catch (eventError) {
+        console.warn('Could not fetch BetResolved event:', eventError);
+      }
+    }
+    
+    res.json({
+      success: true,
+      data: {
+        betId: betId,
+        player: betInfo.player,
+        amount: betInfo.amount.toString(),
+        guess: Number(betInfo.guess),
+        status: Number(betInfo.status), // 0=NONE, 1=PENDING, 2=SETTLED, 3=REFUNDED
+        placedAtBlock: betInfo.placedAtBlock.toString(),
+        resolved: resolvedEvent
+      }
+    });
+  } catch (error) {
+    console.error('Error getting bet info:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to get bet information',
+      error: error.message
+    });
+  }
+});
+
+// Quote payout for a given bet amount
+router.get('/coinflip/quote-payout', async (req, res) => {
+  try {
+    const { amount } = req.query;
+    
+    if (!amount) {
+      return res.status(400).json({
+        success: false,
+        message: 'amount parameter is required'
+      });
+    }
+    
+    const { contract } = getContractInstance();
+    
+    // Get decimals first
+    const decimals = await contract.decimals_().catch(() => 6);
+    const decimalsNum = Number(decimals);
+    
+    // Parse amount (assuming it's in human-readable format, e.g., "1" for 1 USDC)
+    const amountUnits = ethers.parseUnits(String(amount), decimalsNum);
+    
+    // Try to use quotePayout if available
+    let payout = null;
+    try {
+      payout = await contract.quotePayout(amountUnits);
+    } catch {
+      // Fallback to 1.95x calculation
+      payout = (amountUnits * 195n) / 100n;
+    }
+    
+    res.json({
+      success: true,
+      data: {
+        betAmount: amount,
+        betAmountUnits: amountUnits.toString(),
+        payoutUnits: payout.toString(),
+        payoutFormatted: ethers.formatUnits(payout, decimalsNum),
+        decimals: decimalsNum
+      }
+    });
+  } catch (error) {
+    console.error('Error quoting payout:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to quote payout',
+      error: error.message
+    });
+  }
+});
+
+// Check contract liquidity (USDC balance)
+router.get('/coinflip/liquidity', async (req, res) => {
+  try {
+    const { contract, provider } = getContractInstance();
+    
+    const tokenAddress = await contract.token();
+    const erc20Contract = getERC20Contract(tokenAddress, provider);
+    
+    const balance = await erc20Contract.balanceOf(process.env.COINFLIP_ADDRESS);
+    const decimals = await contract.decimals_().catch(() => 6);
+    const decimalsNum = Number(decimals);
+    
+    res.json({
+      success: true,
+      data: {
+        contractAddress: process.env.COINFLIP_ADDRESS,
+        tokenAddress: tokenAddress,
+        balance: balance.toString(),
+        balanceFormatted: ethers.formatUnits(balance, decimalsNum),
+        decimals: decimalsNum
+      }
+    });
+  } catch (error) {
+    console.error('Error checking liquidity:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to check liquidity',
+      error: error.message
+    });
+  }
+});
+
+// Get user's USDC balance and allowance
+router.get('/coinflip/user-balance/:walletAddress', async (req, res) => {
+  try {
+    const { walletAddress } = req.params;
+    const normalizedAddress = ethers.getAddress(walletAddress.toLowerCase().trim());
+    
+    const { contract, provider } = getContractInstance();
+    
+    const tokenAddress = await contract.token();
+    const erc20Contract = getERC20Contract(tokenAddress, provider);
+    const decimals = await contract.decimals_().catch(() => 6);
+    const decimalsNum = Number(decimals);
+    
+    const [balance, allowance] = await Promise.all([
+      erc20Contract.balanceOf(normalizedAddress),
+      erc20Contract.allowance(normalizedAddress, process.env.COINFLIP_ADDRESS)
+    ]);
+    
+    res.json({
+      success: true,
+      data: {
+        walletAddress: normalizedAddress,
+        tokenAddress: tokenAddress,
+        balance: balance.toString(),
+        balanceFormatted: ethers.formatUnits(balance, decimalsNum),
+        allowance: allowance.toString(),
+        allowanceFormatted: ethers.formatUnits(allowance, decimalsNum),
+        decimals: decimalsNum
+      }
+    });
+  } catch (error) {
+    console.error('Error getting user balance:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to get user balance',
+      error: error.message
+    });
+  }
+});
+
+// Check bet status (quick check if bet is resolved)
+router.get('/coinflip/bet/:betId/status', async (req, res) => {
+  try {
+    const { betId } = req.params;
+    const betIdBigInt = BigInt(betId);
+    
+    const { contract, provider } = getContractInstance();
+    
+    const betInfo = await contract.bets(betIdBigInt);
+    const status = Number(betInfo.status);
+    
+    // If resolved, get the BetResolved event
+    let resolvedData = null;
+    if (status === 2) { // SETTLED
+      try {
+        const currentBlock = await provider.getBlockNumber();
+        const fromBlock = Math.max(Number(betInfo.placedAtBlock) - 100, 0);
+        
+        const filter = contract.filters.BetResolved(betIdBigInt);
+        const events = await contract.queryFilter(filter, fromBlock, currentBlock);
+        
+        if (events.length > 0) {
+          const event = events[events.length - 1];
+          const parsed = contract.interface.parseLog(event);
+          resolvedData = {
+            betId: parsed.args[0].toString(),
+            player: parsed.args[1],
+            guess: Number(parsed.args[2]),
+            outcome: Number(parsed.args[3]),
+            won: parsed.args[4] === true || parsed.args[4] === 1n || parsed.args[4] === 1,
+            amount: parsed.args[5].toString(),
+            payout: parsed.args[6].toString(),
+            profit: parsed.args[7].toString()
+          };
+        }
+      } catch (eventError) {
+        console.warn('Could not fetch BetResolved event:', eventError);
+      }
+    }
+    
+    res.json({
+      success: true,
+      data: {
+        betId: betId,
+        status: status, // 0=NONE, 1=PENDING, 2=SETTLED, 3=REFUNDED
+        isResolved: status === 2,
+        isPending: status === 1,
+        resolved: resolvedData
+      }
+    });
+  } catch (error) {
+    console.error('Error checking bet status:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to check bet status',
+      error: error.message
+    });
+  }
+});
+
+// Wait for bet resolution (long polling - waits up to 60 seconds)
+router.get('/coinflip/bet/:betId/wait', async (req, res) => {
+  try {
+    const { betId } = req.params;
+    const betIdBigInt = BigInt(betId);
+    const maxWaitTime = parseInt(req.query.timeout) || 60000; // Default 60 seconds
+    const pollInterval = parseInt(req.query.interval) || 2000; // Default 2 seconds
+    
+    const { contract, provider } = getContractInstance();
+    
+    const startTime = Date.now();
+    let resolved = false;
+    let resolvedData = null;
+    
+    while (!resolved && (Date.now() - startTime) < maxWaitTime) {
+      try {
+        const betInfo = await contract.bets(betIdBigInt);
+        const status = Number(betInfo.status);
+        
+        if (status === 2) { // SETTLED
+          resolved = true;
+          
+          // Get the BetResolved event
+          const currentBlock = await provider.getBlockNumber();
+          const fromBlock = Math.max(Number(betInfo.placedAtBlock) - 100, 0);
+          
+          const filter = contract.filters.BetResolved(betIdBigInt);
+          const events = await contract.queryFilter(filter, fromBlock, currentBlock);
+          
+          if (events.length > 0) {
+            const event = events[events.length - 1];
+            const parsed = contract.interface.parseLog(event);
+            resolvedData = {
+              betId: parsed.args[0].toString(),
+              player: parsed.args[1],
+              guess: Number(parsed.args[2]),
+              outcome: Number(parsed.args[3]),
+              won: parsed.args[4] === true || parsed.args[4] === 1n || parsed.args[4] === 1,
+              amount: parsed.args[5].toString(),
+              payout: parsed.args[6].toString(),
+              profit: parsed.args[7].toString()
+            };
+          }
+        } else if (status === 3) { // REFUNDED
+          resolved = true;
+          resolvedData = { refunded: true };
+        }
+      } catch (pollError) {
+        console.error('Error polling bet:', pollError);
+      }
+      
+      if (!resolved) {
+        await new Promise(resolve => setTimeout(resolve, pollInterval));
+      }
+    }
+    
+    if (resolved && resolvedData) {
+      res.json({
+        success: true,
+        data: {
+          betId: betId,
+          resolved: true,
+          result: resolvedData
+        }
+      });
+    } else {
+      res.json({
+        success: false,
+        data: {
+          betId: betId,
+          resolved: false,
+          message: 'Bet not resolved within timeout period'
+        }
+      });
+    }
+  } catch (error) {
+    console.error('Error waiting for bet resolution:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to wait for bet resolution',
+      error: error.message
+    });
+  }
+});
+
+// Get recent bets for a user
+router.get('/coinflip/user/:walletAddress/bets', async (req, res) => {
+  try {
+    const { walletAddress } = req.params;
+    const normalizedAddress = ethers.getAddress(walletAddress.toLowerCase().trim());
+    const limit = parseInt(req.query.limit) || 10;
+    const fromBlock = parseInt(req.query.fromBlock) || 0;
+    
+    const { contract, provider } = getContractInstance();
+    
+    // Get current block
+    const currentBlock = await provider.getBlockNumber();
+    const queryFromBlock = fromBlock > 0 ? fromBlock : Math.max(0, currentBlock - 10000);
+    
+    // Query BetPlaced events for this user
+    const filter = contract.filters.BetPlaced(null, normalizedAddress); // Filter by player address
+    const events = await contract.queryFilter(filter, queryFromBlock, currentBlock);
+    
+    // Sort by block number (most recent first) and limit
+    const sortedEvents = events
+      .sort((a, b) => b.blockNumber - a.blockNumber)
+      .slice(0, limit);
+    
+    // Get bet details for each event
+    const bets = await Promise.all(
+      sortedEvents.map(async (event) => {
+        const parsed = contract.interface.parseLog(event);
+        const betId = parsed.args[0];
+        
+        try {
+          const betInfo = await contract.bets(betId);
+          const status = Number(betInfo.status);
+          
+          // Try to get BetResolved event if settled
+          let resolvedData = null;
+          if (status === 2) {
+            try {
+              const resolvedFilter = contract.filters.BetResolved(betId);
+              const resolvedEvents = await contract.queryFilter(
+                resolvedFilter,
+                event.blockNumber,
+                currentBlock
+              );
+              
+              if (resolvedEvents.length > 0) {
+                const resolvedEvent = resolvedEvents[resolvedEvents.length - 1];
+                const resolvedParsed = contract.interface.parseLog(resolvedEvent);
+                resolvedData = {
+                  guess: Number(resolvedParsed.args[2]),
+                  outcome: Number(resolvedParsed.args[3]),
+                  won: resolvedParsed.args[4] === true || resolvedParsed.args[4] === 1n || resolvedParsed.args[4] === 1,
+                  amount: resolvedParsed.args[5].toString(),
+                  payout: resolvedParsed.args[6].toString(),
+                  profit: resolvedParsed.args[7].toString()
+                };
+              }
+            } catch (e) {
+              // Ignore if can't get resolved event
+            }
+          }
+          
+          return {
+            betId: betId.toString(),
+            player: parsed.args[1],
+            guess: Number(parsed.args[2]),
+            amount: parsed.args[3].toString(),
+            clientSeed: parsed.args[4].toString(),
+            status: status,
+            placedAtBlock: betInfo.placedAtBlock.toString(),
+            blockNumber: event.blockNumber,
+            transactionHash: event.transactionHash,
+            resolved: resolvedData
+          };
+        } catch (error) {
+          console.error(`Error getting bet ${betId}:`, error);
+          return {
+            betId: betId.toString(),
+            player: parsed.args[1],
+            guess: Number(parsed.args[2]),
+            amount: parsed.args[3].toString(),
+            clientSeed: parsed.args[4].toString(),
+            status: null,
+            error: error.message
+          };
+        }
+      })
+    );
+    
+    res.json({
+      success: true,
+      data: {
+        walletAddress: normalizedAddress,
+        bets: bets,
+        total: events.length
+      }
+    });
+  } catch (error) {
+    console.error('Error getting user bets:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to get user bets',
+      error: error.message
+    });
+  }
+});
+
+// Verify bet placement (after user places bet on frontend, can verify here)
+router.post('/coinflip/verify-bet', async (req, res) => {
+  try {
+    const { transactionHash, betId } = req.body;
+    
+    if (!transactionHash && !betId) {
+      return res.status(400).json({
+        success: false,
+        message: 'transactionHash or betId is required'
+      });
+    }
+    
+    const { contract, provider } = getContractInstance();
+    
+    let betIdToCheck = betId;
+    
+    // If only transactionHash provided, get betId from transaction receipt
+    if (!betIdToCheck && transactionHash) {
+      const receipt = await provider.getTransactionReceipt(transactionHash);
+      if (!receipt) {
+        return res.status(404).json({
+          success: false,
+          message: 'Transaction not found'
+        });
+      }
+      
+      // Find BetPlaced event
+      const betPlacedEvent = receipt.logs.find((log) => {
+        try {
+          const parsed = contract.interface.parseLog(log);
+          return parsed?.name === 'BetPlaced';
+        } catch {
+          return false;
+        }
+      });
+      
+      if (!betPlacedEvent) {
+        return res.status(400).json({
+          success: false,
+          message: 'BetPlaced event not found in transaction'
+        });
+      }
+      
+      const parsed = contract.interface.parseLog(betPlacedEvent);
+      betIdToCheck = parsed.args[0].toString();
+    }
+    
+    // Get bet info
+    const betInfo = await contract.bets(betIdToCheck);
+    
+    res.json({
+      success: true,
+      data: {
+        betId: betIdToCheck,
+        transactionHash: transactionHash || null,
+        player: betInfo.player,
+        amount: betInfo.amount.toString(),
+        guess: Number(betInfo.guess),
+        status: Number(betInfo.status),
+        placedAtBlock: betInfo.placedAtBlock.toString()
+      }
+    });
+  } catch (error) {
+    console.error('Error verifying bet:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to verify bet',
+      error: error.message
+    });
+  }
+});
+
+// Check for pending bets (to verify oracle is working)
+router.get('/coinflip/pending-bets', async (req, res) => {
+  try {
+    const { contract, provider } = getContractInstance();
+    
+    // Get current block
+    const currentBlock = await provider.getBlockNumber();
+    const fromBlock = Math.max(0, currentBlock - 1000); // Check last 1000 blocks
+    
+    // Query for all BetPlaced events
+    const filter = contract.filters.BetPlaced();
+    const events = await contract.queryFilter(filter, fromBlock, currentBlock);
+    
+    // Check status of each bet
+    const pendingBets = [];
+    const resolvedBets = [];
+    
+    for (const event of events) {
+      const parsed = contract.interface.parseLog(event);
+      const betId = parsed.args[0];
+      
+      try {
+        const betInfo = await contract.bets(betId);
+        const status = Number(betInfo.status);
+        
+        const betData = {
+          betId: betId.toString(),
+          player: parsed.args[1],
+          guess: Number(parsed.args[2]),
+          amount: parsed.args[3].toString(),
+          blockNumber: event.blockNumber,
+          transactionHash: event.transactionHash,
+          status: status,
+          placedAtBlock: betInfo.placedAtBlock.toString(),
+          ageBlocks: currentBlock - Number(betInfo.placedAtBlock)
+        };
+        
+        if (status === 1) { // PENDING
+          pendingBets.push(betData);
+        } else if (status === 2) { // SETTLED
+          resolvedBets.push(betData);
+        }
+      } catch (error) {
+        console.error(`Error checking bet ${betId}:`, error);
+      }
+    }
+    
+    res.json({
+      success: true,
+      data: {
+        pending: pendingBets.length,
+        resolved: resolvedBets.length,
+        total: events.length,
+        pendingBets: pendingBets,
+        oldestPendingBlock: pendingBets.length > 0 
+          ? Math.min(...pendingBets.map(b => b.placedAtBlock))
+          : null,
+        currentBlock: currentBlock
+      }
+    });
+  } catch (error) {
+    console.error('Error checking pending bets:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to check pending bets',
+      error: error.message
+    });
+  }
+});
+
+// Check oracle configuration and status
+router.get('/coinflip/oracle-status', async (req, res) => {
+  try {
+    const { contract, provider } = getContractInstance();
+    
+    // Check oracle signer
+    const oracleSigner = await contract.oracleSigner();
+    const expectedOracle = process.env.PRIVATE_KEY 
+      ? new ethers.Wallet(process.env.PRIVATE_KEY, provider).address 
+      : null;
+    
+    const oracleConfigured = expectedOracle && 
+      oracleSigner.toLowerCase() === expectedOracle.toLowerCase();
+    
+    // Check resolve timeout
+    const resolveTimeoutBlocks = await contract.resolveTimeoutBlocks();
+    
+    // Get current block
+    const currentBlock = await provider.getBlockNumber();
+    
+    // Check for recent pending bets
+    const fromBlock = Math.max(0, currentBlock - 100);
+    const filter = contract.filters.BetPlaced();
+    const recentEvents = await contract.queryFilter(filter, fromBlock, currentBlock);
+    
+    let pendingCount = 0;
+    for (const event of recentEvents) {
+      try {
+        const parsed = contract.interface.parseLog(event);
+        const betId = parsed.args[0];
+        const betInfo = await contract.bets(betId);
+        if (Number(betInfo.status) === 1) {
+          pendingCount++;
+        }
+      } catch (e) {
+        // Ignore
+      }
+    }
+    
+    res.json({
+      success: true,
+      data: {
+        oracleConfigured: oracleConfigured,
+        oracleSigner: oracleSigner,
+        expectedOracle: expectedOracle,
+        resolveTimeoutBlocks: resolveTimeoutBlocks.toString(),
+        currentBlock: currentBlock,
+        recentPendingBets: pendingCount,
+        oracleRunning: oracleConfigured, // Best guess - actual status requires oracle process
+        message: oracleConfigured 
+          ? 'Oracle configuration looks correct. Make sure oracle.js is running.'
+          : 'Oracle signer mismatch. Check PRIVATE_KEY in .env matches contract oracleSigner.'
+      }
+    });
+  } catch (error) {
+    console.error('Error checking oracle status:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to check oracle status',
       error: error.message
     });
   }
