@@ -2,7 +2,7 @@ import React, { useState, useEffect } from "react";
 import { ethers } from "ethers";
 import { useToast } from "@/hooks/use-toast";
 import coinFlipABI from "../coinFlip.json";
-import { awardFlipPoints, getUser } from "@/lib/api";
+import { awardFlipPoints, getUser, getOracleStatus, getPendingBets, resolveBetImmediately } from "@/lib/api";
 
 interface CoinFlipProps {
   connectedWallet: string | null;
@@ -38,6 +38,7 @@ export const CoinFlip = ({ connectedWallet, connectedWalletName, walletProviders
   const [networkError, setNetworkError] = useState<string | null>(null);
   const [contractExists, setContractExists] = useState<boolean>(false);
   const [userPoints, setUserPoints] = useState<number>(0);
+  const [oracleStatus, setOracleStatus] = useState<{ configured: boolean; pendingBets: number } | null>(null);
   const { toast } = useToast();
 
   // Contract addresses
@@ -171,6 +172,28 @@ export const CoinFlip = ({ connectedWallet, connectedWalletName, walletProviders
             } catch (error) {
               console.error('Error loading user points:', error);
             }
+          }
+          
+          // Check oracle status
+          try {
+            const oracle = await getOracleStatus();
+            const pending = await getPendingBets();
+            if (oracle.data && pending.data) {
+              setOracleStatus({
+                configured: oracle.data.oracleConfigured,
+                pendingBets: pending.data.pending
+              });
+              
+              if (pending.data.pending > 0 && !oracle.data.oracleConfigured) {
+                toast({
+                  variant: "destructive",
+                  title: "⚠️ Oracle Not Configured",
+                  description: `There are ${pending.data.pending} pending bets. The oracle service needs to be running.`,
+                });
+              }
+            }
+          } catch (error) {
+            console.error('Error checking oracle status:', error);
           }
           
           // Detect contract capabilities
@@ -494,111 +517,221 @@ export const CoinFlip = ({ connectedWallet, connectedWalletName, walletProviders
         }
       }
     
-      
-      if (hasAmountFlip) {
-      }
-      
-      // Pre-simulate to catch revert reasons
-      try {
-        if (hasAmountFlip) {
-          await (contractWithSigner as any).flip.staticCall(guess, amountUnits, userSeed);
-        } else {
-          await (contractWithSigner as any).flip.staticCall(guess, userSeed);
-        }
-      } catch (simErr: any) {
-        const msg = simErr?.shortMessage || simErr?.message || "Transaction would revert";
-        toast({
-          variant: "destructive",
-          title: "Flip would revert",
-          description: msg,
-        });
-        setIsFlipping(false);
-        setShowAnimation(false);
-        setAnimationResult(null);
-        return;
-      }
-
-      // Estimate gas and add safety buffer to avoid out-of-gas
+      // Place the bet - oracle.js will automatically resolve it
       let gasLimit: bigint | undefined = undefined;
       try {
-        const est = hasAmountFlip
-          ? await (contractWithSigner as any).flip.estimateGas(guess, amountUnits, userSeed)
-          : await (contractWithSigner as any).flip.estimateGas(guess, userSeed);
-        // Add 25% headroom
-        gasLimit = (est * 125n) / 100n;
+        const est = await (contractWithSigner as any).placeBet.estimateGas(guess, amountUnits, userSeed);
+        gasLimit = (est * 125n) / 100n; // Add 25% headroom
       } catch (eg) {
         gasLimit = 250000n; // conservative fallback
       }
 
-      const overrides: any = { gasLimit };
-
-      const tx = hasAmountFlip
-        ? await (contractWithSigner as any).flip(guess, amountUnits, userSeed, overrides)
-        : await (contractWithSigner as any).flip(guess, overrides);
+      const placeBetTx = await (contractWithSigner as any).placeBet(guess, amountUnits, userSeed, { gasLimit });
+      const placeBetReceipt = await placeBetTx.wait();
       
- 
-      // Wait for transaction to be mined
-      const receipt = await tx.wait();
-      
-      // Find the FlipResult event
-      const event = receipt.logs.find((log: any) => {
+      // Find the BetPlaced event to get betId
+      const betPlacedEvent = placeBetReceipt.logs.find((log: any) => {
         try {
           const parsed = contract.interface.parseLog(log);
-          return parsed?.name === "FlipResult";
+          return parsed?.name === "BetPlaced";
         } catch {
           return false;
         }
       });
       
-      if (event) {
-        const parsed = contract.interface.parseLog(event);
-        const { guess: contractGuess, outcome, won, amountIn, payoutTotal } = parsed.args as any;
-        
-        // Convert BigInt to number for comparison
-        const guessNum = Number(contractGuess);
-        const outcomeNum = Number(outcome);
-        
-        const guessSide = guessNum === 0 ? "heads" : "tails";
-        const outcomeSide = outcomeNum === 0 ? "heads" : "tails";
-        
-        // Set animation result and wait for animation to complete
-        setAnimationResult(outcomeSide);
-        
-        // Wait for animation to finish (3.5 seconds to match slower animation)
-        await new Promise(resolve => setTimeout(resolve, 3500));
-        
-        // Use the captured guess to ensure accuracy
-        setLastResult({
-          guess: currentGuess, // Use our captured guess, not contract's (in case of conversion issues)
-          outcome: outcomeSide,
-          won: won
-        });
-        
-        setShowAnimation(false);
-        
-        // Update stats
-        await loadUserStats(contract);
-        
-        // Award points for coin flip
-        if (ownerAddress) {
-          try {
-            const pointsResult = await awardFlipPoints(ownerAddress);
-            if (pointsResult.success && pointsResult.points !== undefined) {
-              setUserPoints(pointsResult.points);
-              toast({
-                title: "🎉 Points Awarded!",
-                description: `You earned ${pointsResult.pointsAwarded} points! Total: ${pointsResult.points} points`,
-              });
-            }
-          } catch (error) {
-            console.error('Error awarding points:', error);
-            // Don't show error toast for points, as flip was successful
-          }
+      if (!betPlacedEvent) {
+        throw new Error("BetPlaced event not found");
+      }
+      
+      const betPlacedParsed = contract.interface.parseLog(betPlacedEvent);
+      const betId = betPlacedParsed.args.betId;
+      
+      toast({
+        title: "Bet Placed!",
+        description: "Resolving your bet...",
+      });
+      
+      // Immediately resolve the bet via backend API (no 24/7 service needed!)
+      try {
+        const resolveResult = await resolveBetImmediately(betId);
+        if (!resolveResult.success) {
+          throw new Error(resolveResult.error || "Failed to resolve bet");
         }
         
-        const winDesc = hasAmountFlip
-          ? (won ? `Payout: ${payoutTotal ? ethers.formatUnits(payoutTotal, usdcDecimals) : expectedPayout} USDC` : `You guessed ${currentGuess}, outcome was ${outcomeSide}`)
-          : `You guessed ${currentGuess}, outcome was ${outcomeSide}`;
+        toast({
+          title: "Bet Resolving...",
+          description: "Waiting for transaction confirmation...",
+        });
+        
+        // Wait a moment for the resolve transaction to be mined
+        await new Promise(resolve => setTimeout(resolve, 3000));
+      } catch (resolveError: any) {
+        console.error('Error resolving bet immediately:', resolveError);
+        // Fall back to polling if immediate resolution fails
+        toast({
+          variant: "default",
+          title: "Resolving via fallback...",
+          description: "Waiting for oracle to resolve your bet...",
+        });
+      }
+      
+      // Wait for BetResolved event (either from immediate resolution or fallback)
+      // Poll for up to 60 seconds (oracle should resolve within a few blocks)
+      const MAX_WAIT_TIME = 60000; // 60 seconds
+      const POLL_INTERVAL = 2000; // Check every 2 seconds
+      const startTime = Date.now();
+      let resolved = false;
+      
+      while (!resolved && (Date.now() - startTime) < MAX_WAIT_TIME) {
+        await new Promise(resolve => setTimeout(resolve, POLL_INTERVAL));
+        
+        // Check if bet was resolved by querying the contract
+        try {
+          const betInfo = await contract.bets(betId);
+          // BetStatus: 0 = Pending, 1 = Resolved, 2 = Refunded
+          if (betInfo.status === 1) { // Resolved
+            resolved = true;
+            
+            // Get the BetResolved event from recent blocks
+            const currentBlock = await provider.getBlockNumber();
+            const fromBlock = Math.max(placeBetReceipt.blockNumber, currentBlock - 100);
+            
+            const filter = contract.filters.BetResolved(betId);
+            const events = await contract.queryFilter(filter, fromBlock, currentBlock);
+            
+            if (events.length > 0) {
+              const event = events[events.length - 1]; // Get the most recent
+              const parsed = contract.interface.parseLog(event);
+              
+              // BetResolved event args: [betId, player, guess, outcome, won, amount, payout, profit]
+              // Access by index since parsed.args is an array
+              const betIdFromEvent = parsed.args[0];
+              const player = parsed.args[1];
+              const contractGuess = parsed.args[2];
+              const outcome = parsed.args[3];
+              const wonRaw = parsed.args[4];
+              const amountIn = parsed.args[5];
+              const payoutTotal = parsed.args[6];
+              const profit = parsed.args[7];
+              
+              // Convert BigInt to number for comparison
+              const guessNum = Number(contractGuess);
+              const outcomeNum = Number(outcome);
+              
+              // Convert won to boolean (handles both boolean and BigInt/Number)
+              const won = typeof wonRaw === 'boolean' 
+                ? wonRaw 
+                : (wonRaw === 1n || wonRaw === 1 || wonRaw === true);
+              
+              // Debug logging
+              console.log('[CoinFlip] BetResolved event parsed:', {
+                betId: betIdFromEvent.toString(),
+                player: player.toString(),
+                contractGuess: contractGuess.toString(),
+                guessNum,
+                outcome: outcome.toString(),
+                outcomeNum,
+                wonRaw: wonRaw.toString(),
+                won: won,
+                wonType: typeof wonRaw,
+                userSelected: currentGuess,
+                amount: amountIn.toString(),
+                payout: payoutTotal.toString()
+              });
+              
+              const guessSide = guessNum === 0 ? "heads" : "tails";
+              const outcomeSide = outcomeNum === 0 ? "heads" : "tails";
+              
+              console.log('[CoinFlip] Converted values:', {
+                guessSide,
+                outcomeSide,
+                userSelected: currentGuess,
+                matches: guessSide === currentGuess
+              });
+              
+              // Set animation result and wait for animation to complete
+              setAnimationResult(outcomeSide);
+              
+              // Wait for animation to finish (3.5 seconds to match slower animation)
+              await new Promise(resolve => setTimeout(resolve, 3500));
+              
+              // Use the captured guess to ensure accuracy
+              setLastResult({
+                guess: currentGuess,
+                outcome: outcomeSide,
+                won: won
+              });
+              
+              setShowAnimation(false);
+              
+              // Update stats
+              await loadUserStats(contract);
+              
+              // Award points for coin flip
+              if (ownerAddress) {
+                try {
+                  const pointsResult = await awardFlipPoints(ownerAddress);
+                  if (pointsResult.success && pointsResult.points !== undefined) {
+                    setUserPoints(pointsResult.points);
+                    toast({
+                      title: "🎉 Points Awarded!",
+                      description: `You earned ${pointsResult.pointsAwarded} points! Total: ${pointsResult.points} points`,
+                    });
+                  }
+                } catch (error) {
+                  console.error('Error awarding points:', error);
+                  // Don't show error toast for points, as flip was successful
+                }
+              }
+              
+              // Show win/loss toast notification
+              if (won) {
+                const payoutAmount = hasAmountFlip && payoutTotal 
+                  ? ethers.formatUnits(payoutTotal, usdcDecimals) 
+                  : expectedPayout;
+                toast({
+                  title: "🎉 You Won!",
+                  description: hasAmountFlip 
+                    ? `Payout: ${payoutAmount} USDC` 
+                    : `You correctly guessed ${outcomeSide}!`,
+                });
+              } else {
+                toast({
+                  variant: "destructive",
+                  title: "You Lost",
+                  description: hasAmountFlip
+                    ? `You guessed ${currentGuess}, but the outcome was ${outcomeSide}`
+                    : `The outcome was ${outcomeSide}, not ${currentGuess}`,
+                });
+              }
+              
+              break;
+            }
+          }
+        } catch (pollError) {
+          console.error('Error polling for bet resolution:', pollError);
+        }
+      }
+      
+      if (!resolved) {
+        // Check oracle status before showing error
+        try {
+          const oracle = await getOracleStatus();
+          const pending = await getPendingBets();
+          if (oracle.data && pending.data) {
+            if (!oracle.data.oracleConfigured) {
+              throw new Error("Oracle service is not running. Please start it with: npm run dev:oracle");
+            } else if (pending.data.pending > 0) {
+              throw new Error(`Bet not resolved. There are ${pending.data.pending} pending bets. The oracle may be processing them.`);
+            }
+          }
+        } catch (oracleError) {
+          // Use the oracle error message if available
+          if (oracleError instanceof Error && oracleError.message.includes("Oracle")) {
+            throw oracleError;
+          }
+        }
+        throw new Error("Bet was not resolved within timeout. The oracle may be offline. Check oracle status or try again later.");
       }
       
     } catch (error: any) {
@@ -647,6 +780,23 @@ export const CoinFlip = ({ connectedWallet, connectedWalletName, walletProviders
             <div className="flex-1">
               <p className="font-pixel text-red-700 text-sm font-bold">Network Issue</p>
               <p className="font-retro text-red-600 text-xs">{networkError}</p>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Oracle Status Warning */}
+      {oracleStatus && !oracleStatus.configured && (
+        <div className="win98-border bg-yellow-100 p-3 border-yellow-500">
+          <div className="flex items-center gap-2">
+            <span className="text-2xl">⚠️</span>
+            <div className="flex-1">
+              <p className="font-pixel text-yellow-700 text-sm font-bold">Oracle Service Required</p>
+              <p className="font-retro text-yellow-600 text-xs">
+                {oracleStatus.pendingBets > 0 
+                  ? `There ${oracleStatus.pendingBets === 1 ? 'is' : 'are'} ${oracleStatus.pendingBets} pending bet${oracleStatus.pendingBets === 1 ? '' : 's'}. The oracle service needs to be running to resolve bets.`
+                  : 'The oracle service is not configured. Start it with: npm run dev:oracle'}
+              </p>
             </div>
           </div>
         </div>
