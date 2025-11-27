@@ -192,3 +192,506 @@ export async function getLeaderboard(limit: number = 10): Promise<Array<{ wallet
   }
 }
 
+/**
+ * Get oracle signature for resolving a bet
+ */
+export async function getOracleSignature(betId: number | bigint): Promise<{ success: boolean; random?: string; signature?: string; message?: string }> {
+  try {
+    const response = await fetch(`${API_BASE_URL}/users/oracle/resolve`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ betId: betId.toString() }),
+    });
+    
+    const data = await response.json();
+    return {
+      success: data.success,
+      random: data.random,
+      signature: data.signature,
+      message: data.message
+    };
+  } catch (error) {
+    console.error('Error getting oracle signature:', error);
+    return {
+      success: false,
+      message: 'Failed to get oracle signature'
+    };
+  }
+}
+
+// ==================== CoinFlip Backend API Functions ====================
+
+export interface ContractInfo {
+  maxBet: string | null;
+  decimals: number | null;
+  tokenAddress: string | null;
+  oracleSigner: string | null;
+  resolveTimeoutBlocks: string | null;
+  hasQuotePayout: boolean;
+  contractAddress: string;
+}
+
+/**
+ * Get contract information (max bet, decimals, token address, etc.)
+ */
+export async function getContractInfo(): Promise<{ success: boolean; data?: ContractInfo; error?: string }> {
+  try {
+    const response = await fetch(`${API_BASE_URL}/users/coinflip/contract-info`);
+    const data = await response.json();
+    return {
+      success: data.success,
+      data: data.data,
+      error: data.error
+    };
+  } catch (error) {
+    console.error('Error getting contract info:', error);
+    return {
+      success: false,
+      error: error instanceof Error ? error.message : 'Failed to get contract info'
+    };
+  }
+}
+
+export interface ContractStats {
+  walletAddress: string;
+  plays: string;
+  wins: string;
+  wagered: string;
+  paidOut: string;
+}
+
+/**
+ * Get user stats from the contract
+ */
+export async function getContractStats(walletAddress: string): Promise<{ success: boolean; data?: ContractStats; error?: string }> {
+  try {
+    const response = await fetch(`${API_BASE_URL}/users/coinflip/stats/${walletAddress}`);
+    const data = await response.json();
+    return {
+      success: data.success,
+      data: data.data,
+      error: data.error
+    };
+  } catch (error) {
+    console.error('Error getting contract stats:', error);
+    return {
+      success: false,
+      error: error instanceof Error ? error.message : 'Failed to get contract stats'
+    };
+  }
+}
+
+export interface BetInfo {
+  betId: string;
+  player: string;
+  amount: string;
+  guess: number;
+  status: number; // 0=NONE, 1=PENDING, 2=SETTLED, 3=REFUNDED
+  placedAtBlock: string;
+  resolved?: {
+    betId: string;
+    player: string;
+    guess: number;
+    outcome: number;
+    won: boolean;
+    amount: string;
+    payout: string;
+    profit: string;
+  } | null;
+}
+
+/**
+ * Get bet information by betId
+ */
+export async function getBetInfo(betId: number | bigint | string): Promise<{ success: boolean; data?: BetInfo; error?: string }> {
+  try {
+    const response = await fetch(`${API_BASE_URL}/users/coinflip/bet/${betId.toString()}`);
+    const data = await response.json();
+    return {
+      success: data.success,
+      data: data.data,
+      error: data.error
+    };
+  } catch (error) {
+    console.error('Error getting bet info:', error);
+    return {
+      success: false,
+      error: error instanceof Error ? error.message : 'Failed to get bet info'
+    };
+  }
+}
+
+export interface PayoutQuote {
+  betAmount: string;
+  betAmountUnits: string;
+  payoutUnits: string;
+  payoutFormatted: string;
+  decimals: number;
+}
+
+/**
+ * Quote payout for a given bet amount
+ */
+export async function quotePayout(amount: number | string): Promise<{ success: boolean; data?: PayoutQuote; error?: string }> {
+  try {
+    const response = await fetch(`${API_BASE_URL}/users/coinflip/quote-payout?amount=${amount}`);
+    const data = await response.json();
+    return {
+      success: data.success,
+      data: data.data,
+      error: data.error
+    };
+  } catch (error) {
+    console.error('Error quoting payout:', error);
+    return {
+      success: false,
+      error: error instanceof Error ? error.message : 'Failed to quote payout'
+    };
+  }
+}
+
+export interface LiquidityInfo {
+  contractAddress: string;
+  tokenAddress: string;
+  balance: string;
+  balanceFormatted: string;
+  decimals: number;
+}
+
+/**
+ * Check contract liquidity (USDC balance)
+ */
+export async function getContractLiquidity(): Promise<{ success: boolean; data?: LiquidityInfo; error?: string }> {
+  try {
+    const response = await fetch(`${API_BASE_URL}/users/coinflip/liquidity`);
+    const data = await response.json();
+    return {
+      success: data.success,
+      data: data.data,
+      error: data.error
+    };
+  } catch (error) {
+    console.error('Error checking liquidity:', error);
+    return {
+      success: false,
+      error: error instanceof Error ? error.message : 'Failed to check liquidity'
+    };
+  }
+}
+
+export interface UserBalance {
+  walletAddress: string;
+  tokenAddress: string;
+  balance: string;
+  balanceFormatted: string;
+  allowance: string;
+  allowanceFormatted: string;
+  decimals: number;
+}
+
+/**
+ * Get user's USDC balance and allowance
+ */
+export async function getUserBalance(walletAddress: string): Promise<{ success: boolean; data?: UserBalance; error?: string }> {
+  try {
+    const response = await fetch(`${API_BASE_URL}/users/coinflip/user-balance/${walletAddress}`);
+    const data = await response.json();
+    return {
+      success: data.success,
+      data: data.data,
+      error: data.error
+    };
+  } catch (error) {
+    console.error('Error getting user balance:', error);
+    return {
+      success: false,
+      error: error instanceof Error ? error.message : 'Failed to get user balance'
+    };
+  }
+}
+
+export interface BetStatus {
+  betId: string;
+  status: number; // 0=NONE, 1=PENDING, 2=SETTLED, 3=REFUNDED
+  isResolved: boolean;
+  isPending: boolean;
+  resolved?: {
+    betId: string;
+    player: string;
+    guess: number;
+    outcome: number;
+    won: boolean;
+    amount: string;
+    payout: string;
+    profit: string;
+  } | null;
+}
+
+/**
+ * Check bet status (quick check if bet is resolved)
+ */
+export async function getBetStatus(betId: number | bigint | string): Promise<{ success: boolean; data?: BetStatus; error?: string }> {
+  try {
+    const response = await fetch(`${API_BASE_URL}/users/coinflip/bet/${betId.toString()}/status`);
+    const data = await response.json();
+    return {
+      success: data.success,
+      data: data.data,
+      error: data.error
+    };
+  } catch (error) {
+    console.error('Error checking bet status:', error);
+    return {
+      success: false,
+      error: error instanceof Error ? error.message : 'Failed to check bet status'
+    };
+  }
+}
+
+export interface BetWaitResult {
+  betId: string;
+  resolved: boolean;
+  result?: {
+    betId: string;
+    player: string;
+    guess: number;
+    outcome: number;
+    won: boolean;
+    amount: string;
+    payout: string;
+    profit: string;
+  } | { refunded: boolean } | null;
+  message?: string;
+}
+
+/**
+ * Wait for bet resolution (long polling - waits up to 60 seconds)
+ */
+export async function waitForBetResolution(
+  betId: number | bigint | string,
+  timeout: number = 60000,
+  interval: number = 2000
+): Promise<{ success: boolean; data?: BetWaitResult; error?: string }> {
+  try {
+    const response = await fetch(
+      `${API_BASE_URL}/users/coinflip/bet/${betId.toString()}/wait?timeout=${timeout}&interval=${interval}`
+    );
+    const data = await response.json();
+    return {
+      success: data.success,
+      data: data.data,
+      error: data.error
+    };
+  } catch (error) {
+    console.error('Error waiting for bet resolution:', error);
+    return {
+      success: false,
+      error: error instanceof Error ? error.message : 'Failed to wait for bet resolution'
+    };
+  }
+}
+
+export interface UserBet {
+  betId: string;
+  player: string;
+  guess: number;
+  amount: string;
+  clientSeed: string;
+  status: number | null;
+  placedAtBlock: string;
+  blockNumber: number;
+  transactionHash: string;
+  resolved?: {
+    guess: number;
+    outcome: number;
+    won: boolean;
+    amount: string;
+    payout: string;
+    profit: string;
+  } | null;
+  error?: string;
+}
+
+export interface UserBetsResponse {
+  walletAddress: string;
+  bets: UserBet[];
+  total: number;
+}
+
+/**
+ * Get recent bets for a user
+ */
+export async function getUserBets(
+  walletAddress: string,
+  limit: number = 10,
+  fromBlock?: number
+): Promise<{ success: boolean; data?: UserBetsResponse; error?: string }> {
+  try {
+    let url = `${API_BASE_URL}/users/coinflip/user/${walletAddress}/bets?limit=${limit}`;
+    if (fromBlock) {
+      url += `&fromBlock=${fromBlock}`;
+    }
+    
+    const response = await fetch(url);
+    const data = await response.json();
+    return {
+      success: data.success,
+      data: data.data,
+      error: data.error
+    };
+  } catch (error) {
+    console.error('Error getting user bets:', error);
+    return {
+      success: false,
+      error: error instanceof Error ? error.message : 'Failed to get user bets'
+    };
+  }
+}
+
+export interface VerifiedBet {
+  betId: string;
+  transactionHash: string | null;
+  player: string;
+  amount: string;
+  guess: number;
+  status: number;
+  placedAtBlock: string;
+}
+
+/**
+ * Verify bet placement (after user places bet on frontend)
+ */
+export async function verifyBet(
+  transactionHash?: string,
+  betId?: number | bigint | string
+): Promise<{ success: boolean; data?: VerifiedBet; error?: string }> {
+  try {
+    const response = await fetch(`${API_BASE_URL}/users/coinflip/verify-bet`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        transactionHash: transactionHash || undefined,
+        betId: betId ? betId.toString() : undefined
+      }),
+    });
+    
+    const data = await response.json();
+    return {
+      success: data.success,
+      data: data.data,
+      error: data.error
+    };
+  } catch (error) {
+    console.error('Error verifying bet:', error);
+    return {
+      success: false,
+      error: error instanceof Error ? error.message : 'Failed to verify bet'
+    };
+  }
+}
+
+export interface PendingBetsResponse {
+  pending: number;
+  resolved: number;
+  total: number;
+  pendingBets: Array<{
+    betId: string;
+    player: string;
+    guess: number;
+    amount: string;
+    blockNumber: number;
+    transactionHash: string;
+    status: number;
+    placedAtBlock: string;
+    ageBlocks: number;
+  }>;
+  oldestPendingBlock: string | null;
+  currentBlock: number;
+}
+
+/**
+ * Check for pending bets (to verify oracle is working)
+ */
+export async function getPendingBets(): Promise<{ success: boolean; data?: PendingBetsResponse; error?: string }> {
+  try {
+    const response = await fetch(`${API_BASE_URL}/users/coinflip/pending-bets`);
+    const data = await response.json();
+    return {
+      success: data.success,
+      data: data.data,
+      error: data.error
+    };
+  } catch (error) {
+    console.error('Error getting pending bets:', error);
+    return {
+      success: false,
+      error: error instanceof Error ? error.message : 'Failed to get pending bets'
+    };
+  }
+}
+
+export interface OracleStatus {
+  oracleConfigured: boolean;
+  oracleSigner: string;
+  expectedOracle: string | null;
+  resolveTimeoutBlocks: string;
+  currentBlock: number;
+  recentPendingBets: number;
+  oracleRunning: boolean;
+  message: string;
+}
+
+/**
+ * Check oracle configuration and status
+ */
+export async function getOracleStatus(): Promise<{ success: boolean; data?: OracleStatus; error?: string }> {
+  try {
+    const response = await fetch(`${API_BASE_URL}/users/coinflip/oracle-status`);
+    const data = await response.json();
+    return {
+      success: data.success,
+      data: data.data,
+      error: data.error
+    };
+  } catch (error) {
+    console.error('Error getting oracle status:', error);
+    return {
+      success: false,
+      error: error instanceof Error ? error.message : 'Failed to get oracle status'
+    };
+  }
+}
+
+/**
+ * Resolve bet immediately after placement (no 24/7 service needed)
+ * This is called right after user places bet, eliminating need for polling
+ */
+export async function resolveBetImmediately(betId: number | bigint | string): Promise<{ success: boolean; transactionHash?: string; error?: string }> {
+  try {
+    const response = await fetch(`${API_BASE_URL}/oracle/resolve-bet`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ betId: betId.toString() }),
+    });
+    
+    const data = await response.json();
+    return {
+      success: data.success,
+      transactionHash: data.transactionHash,
+      error: data.error || data.message
+    };
+  } catch (error) {
+    console.error('Error resolving bet:', error);
+    return {
+      success: false,
+      error: error instanceof Error ? error.message : 'Failed to resolve bet'
+    };
+  }
+}
+
