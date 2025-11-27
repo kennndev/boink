@@ -92,21 +92,38 @@ export default async function handler(req, res) {
     if (onchainOracle.toLowerCase() !== wallet.address.toLowerCase()) {
       return res.status(500).json({ 
         error: 'Oracle signer mismatch',
-        onchain: onchainOracle,
-        wallet: wallet.address
+        message: 'The PRIVATE_KEY in Vercel environment variables does not match the oracleSigner set in the contract.',
+        onchainOracle: onchainOracle,
+        walletAddress: wallet.address,
+        solution: 'Either update PRIVATE_KEY in Vercel to match the contract\'s oracleSigner, or update the contract\'s oracleSigner to match your PRIVATE_KEY (requires contract owner)'
       });
     }
 
     // Get bet info
     const betIdBigInt = BigInt(betId);
     const betInfo = await contract.bets(betIdBigInt);
-
+    const status = Number(betInfo.status);
+    
+    // BetStatus: 0 = NONE, 1 = PENDING, 2 = SETTLED, 3 = REFUNDED
     // Check if bet is pending
-    if (Number(betInfo.status) !== 1) {
+    if (status !== 1) {
+      // If already settled, return success (bet was already resolved)
+      if (status === 2) {
+        return res.status(200).json({ 
+          success: true,
+          message: 'Bet was already resolved',
+          betId: betId,
+          status: status,
+          alreadyResolved: true
+        });
+      }
+      
       return res.status(400).json({ 
         error: 'Bet is not pending',
-        status: Number(betInfo.status),
-        betId: betId
+        status: status,
+        statusText: status === 0 ? 'NONE' : status === 2 ? 'SETTLED' : status === 3 ? 'REFUNDED' : 'UNKNOWN',
+        betId: betId,
+        message: `Bet status is ${status} (${status === 0 ? 'NONE' : status === 2 ? 'SETTLED' : status === 3 ? 'REFUNDED' : 'UNKNOWN'}), expected 1 (PENDING)`
       });
     }
 
