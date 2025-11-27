@@ -124,9 +124,18 @@ export default async function handler(req, res) {
     const SERVER_SEED = process.env.SERVER_SEED;
     const CHAIN_ID = Number(process.env.CHAIN_ID || process.env.VITE_CHAIN_ID || 763373);
 
-    if (!RPC_URL || !PRIVATE_KEY || !CONTRACT_ADDRESS || !SERVER_SEED) {
+    const missingVars = [];
+    if (!RPC_URL) missingVars.push('RPC_URL');
+    if (!PRIVATE_KEY) missingVars.push('PRIVATE_KEY');
+    if (!CONTRACT_ADDRESS) missingVars.push('COINFLIP_ADDRESS');
+    if (!SERVER_SEED) missingVars.push('SERVER_SEED');
+    
+    if (missingVars.length > 0) {
       return res.status(500).json({ 
-        error: 'Missing required environment variables'
+        error: 'Missing required environment variables',
+        missing: missingVars,
+        required: ['RPC_URL', 'PRIVATE_KEY', 'COINFLIP_ADDRESS', 'SERVER_SEED'],
+        message: `Please set the following environment variables in Vercel: ${missingVars.join(', ')}`
       });
     }
 
@@ -134,13 +143,40 @@ export default async function handler(req, res) {
     const wallet = new ethers.Wallet(PRIVATE_KEY, provider);
     const contract = new ethers.Contract(CONTRACT_ADDRESS, coinFlipABI, wallet);
 
+    // Helper function to query events in chunks (respects RPC limits)
+    async function queryEventsInChunks(contract, filter, fromBlock, toBlock, maxBlockRange = 10) {
+      const allEvents = [];
+      let currentFrom = fromBlock;
+      
+      while (currentFrom <= toBlock) {
+        const currentTo = Math.min(currentFrom + maxBlockRange - 1, toBlock);
+        try {
+          const chunkEvents = await contract.queryFilter(filter, currentFrom, currentTo);
+          allEvents.push(...chunkEvents);
+        } catch (error) {
+          console.warn(`Error querying blocks ${currentFrom}-${currentTo}:`, error.message);
+          // Continue with next chunk
+        }
+        currentFrom = currentTo + 1;
+        
+        // Small delay to avoid rate limiting
+        if (currentFrom <= toBlock) {
+          await new Promise(resolve => setTimeout(resolve, 100));
+        }
+      }
+      
+      return allEvents;
+    }
+
     // Get current block
     const currentBlock = await provider.getBlockNumber();
-    const fromBlock = Math.max(0, currentBlock - 1000); // Check last 1000 blocks
+    // Limit to last 50 blocks to avoid RPC limits
+    const maxBlocksToCheck = 50;
+    const fromBlock = Math.max(0, currentBlock - maxBlocksToCheck);
 
-    // Find pending bets
+    // Find pending bets (query in chunks of 10 blocks)
     const filter = contract.filters.BetPlaced();
-    const events = await contract.queryFilter(filter, fromBlock, currentBlock);
+    const events = await queryEventsInChunks(contract, filter, fromBlock, currentBlock, 10);
 
     const pendingBets = [];
     for (const event of events) {
