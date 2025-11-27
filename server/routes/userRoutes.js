@@ -800,11 +800,14 @@ router.get('/coinflip/bet/:betId/status', async (req, res) => {
     let resolvedData = null;
     if (status === 2) { // SETTLED
       try {
+        const placedBlock = Number(betInfo.placedAtBlock);
         const currentBlock = await provider.getBlockNumber();
-        const fromBlock = Math.max(Number(betInfo.placedAtBlock) - 100, 0);
+        // Use small range around placed block (respects 10-block limit)
+        const fromBlock = Math.max(placedBlock - 5, 0);
+        const toBlock = Math.min(placedBlock + 10, currentBlock);
         
         const filter = contract.filters.BetResolved(betIdBigInt);
-        const events = await contract.queryFilter(filter, fromBlock, currentBlock);
+        const events = await contract.queryFilter(filter, fromBlock, toBlock);
         
         if (events.length > 0) {
           const event = events[events.length - 1];
@@ -868,11 +871,14 @@ router.get('/coinflip/bet/:betId/wait', async (req, res) => {
           resolved = true;
           
           // Get the BetResolved event
+          const placedBlock = Number(betInfo.placedAtBlock);
           const currentBlock = await provider.getBlockNumber();
-          const fromBlock = Math.max(Number(betInfo.placedAtBlock) - 100, 0);
+          // Use small range around placed block (respects 10-block limit)
+          const fromBlock = Math.max(placedBlock - 5, 0);
+          const toBlock = Math.min(placedBlock + 10, currentBlock);
           
           const filter = contract.filters.BetResolved(betIdBigInt);
-          const events = await contract.queryFilter(filter, fromBlock, currentBlock);
+          const events = await contract.queryFilter(filter, fromBlock, toBlock);
           
           if (events.length > 0) {
             const event = events[events.length - 1];
@@ -942,11 +948,13 @@ router.get('/coinflip/user/:walletAddress/bets', async (req, res) => {
     
     // Get current block
     const currentBlock = await provider.getBlockNumber();
-    const queryFromBlock = fromBlock > 0 ? fromBlock : Math.max(0, currentBlock - 10000);
+    // Limit to reasonable range to avoid RPC limits (can be increased if user provides fromBlock)
+    const maxBlocksToCheck = fromBlock > 0 ? (currentBlock - fromBlock) : 50;
+    const queryFromBlock = fromBlock > 0 ? fromBlock : Math.max(0, currentBlock - maxBlocksToCheck);
     
-    // Query BetPlaced events for this user
+    // Query BetPlaced events for this user (in chunks to respect RPC limits)
     const filter = contract.filters.BetPlaced(null, normalizedAddress); // Filter by player address
-    const events = await contract.queryFilter(filter, queryFromBlock, currentBlock);
+    const events = await queryEventsInChunks(contract, filter, queryFromBlock, currentBlock, 10);
     
     // Sort by block number (most recent first) and limit
     const sortedEvents = events
@@ -968,10 +976,14 @@ router.get('/coinflip/user/:walletAddress/bets', async (req, res) => {
           if (status === 2) {
             try {
               const resolvedFilter = contract.filters.BetResolved(betId);
+              const eventBlock = event.blockNumber;
+              // Use small range around event block (respects 10-block limit)
+              const fromBlock = Math.max(eventBlock - 5, 0);
+              const toBlock = Math.min(eventBlock + 10, currentBlock);
               const resolvedEvents = await contract.queryFilter(
                 resolvedFilter,
-                event.blockNumber,
-                currentBlock
+                fromBlock,
+                toBlock
               );
               
               if (resolvedEvents.length > 0) {
@@ -1108,6 +1120,31 @@ router.post('/coinflip/verify-bet', async (req, res) => {
   }
 });
 
+// Helper function to query events in chunks (respects RPC limits)
+async function queryEventsInChunks(contract, filter, fromBlock, toBlock, maxBlockRange = 10) {
+  const allEvents = [];
+  let currentFrom = fromBlock;
+  
+  while (currentFrom <= toBlock) {
+    const currentTo = Math.min(currentFrom + maxBlockRange - 1, toBlock);
+    try {
+      const chunkEvents = await contract.queryFilter(filter, currentFrom, currentTo);
+      allEvents.push(...chunkEvents);
+    } catch (error) {
+      console.warn(`Error querying blocks ${currentFrom}-${currentTo}:`, error.message);
+      // Continue with next chunk
+    }
+    currentFrom = currentTo + 1;
+    
+    // Small delay to avoid rate limiting
+    if (currentFrom <= toBlock) {
+      await new Promise(resolve => setTimeout(resolve, 100));
+    }
+  }
+  
+  return allEvents;
+}
+
 // Check for pending bets (to verify oracle is working)
 router.get('/coinflip/pending-bets', async (req, res) => {
   try {
@@ -1115,11 +1152,13 @@ router.get('/coinflip/pending-bets', async (req, res) => {
     
     // Get current block
     const currentBlock = await provider.getBlockNumber();
-    const fromBlock = Math.max(0, currentBlock - 1000); // Check last 1000 blocks
+    // Limit to last 50 blocks to avoid RPC limits (can be increased if needed)
+    const maxBlocksToCheck = parseInt(req.query.maxBlocks) || 50;
+    const fromBlock = Math.max(0, currentBlock - maxBlocksToCheck);
     
-    // Query for all BetPlaced events
+    // Query for all BetPlaced events in chunks (respects 10-block limit)
     const filter = contract.filters.BetPlaced();
-    const events = await contract.queryFilter(filter, fromBlock, currentBlock);
+    const events = await queryEventsInChunks(contract, filter, fromBlock, currentBlock, 10);
     
     // Check status of each bet
     const pendingBets = [];
@@ -1198,10 +1237,10 @@ router.get('/coinflip/oracle-status', async (req, res) => {
     // Get current block
     const currentBlock = await provider.getBlockNumber();
     
-    // Check for recent pending bets
-    const fromBlock = Math.max(0, currentBlock - 100);
+    // Check for recent pending bets (limit to 10 blocks for free tier RPC)
+    const fromBlock = Math.max(0, currentBlock - 10);
     const filter = contract.filters.BetPlaced();
-    const recentEvents = await contract.queryFilter(filter, fromBlock, currentBlock);
+    const recentEvents = await queryEventsInChunks(contract, filter, fromBlock, currentBlock, 10);
     
     let pendingCount = 0;
     for (const event of recentEvents) {
