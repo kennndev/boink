@@ -128,13 +128,43 @@ export default async function handler(req, res) {
     }
 
     // Get BetPlaced event to get clientSeed
-    // Use the exact block where bet was placed (or small range for safety)
+    // Use the exact block where bet was placed (respects 10-block RPC limit)
     const placedBlock = Number(betInfo.placedAtBlock);
-    const fromBlock = Math.max(placedBlock - 5, 0); // Small range around placed block
-    const toBlock = Math.min(placedBlock + 5, await provider.getBlockNumber());
+    const currentBlock = await provider.getBlockNumber();
+    
+    // Ensure range is exactly 10 blocks or less (RPC free tier limit)
+    // Range is inclusive, so 10 blocks = fromBlock to fromBlock + 9
+    const maxRange = 10;
+    const fromBlock = Math.max(placedBlock - 4, 0);
+    let toBlock = Math.min(placedBlock + 5, currentBlock);
+    
+    // Calculate actual range (inclusive: toBlock - fromBlock + 1)
+    let blockRange = toBlock - fromBlock + 1;
+    
+    // If range exceeds 10, adjust to exactly 10 blocks
+    if (blockRange > maxRange) {
+      toBlock = fromBlock + maxRange - 1; // -1 because range is inclusive
+      blockRange = maxRange;
+      console.log(`Adjusted block range to exactly ${blockRange} blocks: [${fromBlock}, ${toBlock}]`);
+    }
     
     const filter = contract.filters.BetPlaced(betIdBigInt);
-    const events = await contract.queryFilter(filter, fromBlock, toBlock);
+    let events = [];
+    try {
+      console.log(`Querying BetPlaced event for betId ${betId} in blocks [${fromBlock}, ${toBlock}] (range: ${blockRange})`);
+      events = await contract.queryFilter(filter, fromBlock, toBlock);
+    } catch (queryError) {
+      // If query fails, try even smaller range
+      console.warn('Event query failed, trying exact block:', queryError.message);
+      try {
+        // Try querying just the placed block (range = 1)
+        events = await contract.queryFilter(filter, placedBlock, placedBlock);
+        console.log('Successfully queried single block');
+      } catch (e) {
+        console.error('Event query failed even for single block:', e.message);
+        throw new Error(`Failed to query BetPlaced event: ${e.message}`);
+      }
+    }
     
     if (events.length === 0) {
       return res.status(404).json({ error: 'BetPlaced event not found' });
