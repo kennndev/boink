@@ -588,16 +588,35 @@ export const CoinFlip = ({ connectedWallet, connectedWalletName, walletProviders
         // Check if bet was resolved by querying the contract
         try {
           const betInfo = await contract.bets(betId);
-          // BetStatus: 0 = Pending, 1 = Resolved, 2 = Refunded
-          if (betInfo.status === 1) { // Resolved
+          // BetStatus: 0 = NONE, 1 = PENDING, 2 = SETTLED, 3 = REFUNDED
+          const status = Number(betInfo.status);
+          if (status === 2) { // SETTLED (resolved)
             resolved = true;
             
             // Get the BetResolved event from recent blocks
             const currentBlock = await provider.getBlockNumber();
-            const fromBlock = Math.max(placeBetReceipt.blockNumber, currentBlock - 100);
+            const placedBlock = Number(betInfo.placedAtBlock);
+            // Use small range around placed block (respects 10-block RPC limit)
+            const fromBlock = Math.max(placedBlock - 5, placeBetReceipt.blockNumber);
+            const toBlock = Math.min(placedBlock + 10, currentBlock);
             
             const filter = contract.filters.BetResolved(betId);
-            const events = await contract.queryFilter(filter, fromBlock, currentBlock);
+            let events = [];
+            try {
+              events = await contract.queryFilter(filter, fromBlock, toBlock);
+            } catch (queryError: any) {
+              console.warn('[CoinFlip] Event query failed, trying smaller range:', queryError);
+              // Try even smaller range if query fails
+              const smallFromBlock = Math.max(placedBlock - 2, placeBetReceipt.blockNumber);
+              const smallToBlock = Math.min(placedBlock + 5, currentBlock);
+              try {
+                events = await contract.queryFilter(filter, smallFromBlock, smallToBlock);
+              } catch (e) {
+                console.error('[CoinFlip] Event query failed with small range:', e);
+              }
+            }
+            
+            console.log('[CoinFlip] BetResolved events found:', events.length, 'for betId:', betId.toString());
             
             if (events.length > 0) {
               const event = events[events.length - 1]; // Get the most recent
