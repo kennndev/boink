@@ -553,26 +553,46 @@ export const CoinFlip = ({ connectedWallet, connectedWalletName, walletProviders
       
       // Immediately resolve the bet via backend API (no 24/7 service needed!)
       try {
+        // Wait a moment for the bet to be confirmed on-chain before resolving
+        await new Promise(resolve => setTimeout(resolve, 2000));
+        
         const resolveResult = await resolveBetImmediately(betId);
-        if (!resolveResult.success) {
-          throw new Error(resolveResult.error || "Failed to resolve bet");
+        
+        // If bet was already resolved, that's okay - just proceed to check result
+        if (resolveResult.success || (resolveResult as any).alreadyResolved) {
+          toast({
+            title: "Bet Resolving...",
+            description: resolveResult.success ? "Waiting for transaction confirmation..." : "Bet already resolved, checking result...",
+          });
+          
+          // Wait a moment for the resolve transaction to be mined (if it was just resolved)
+          if (resolveResult.success) {
+            await new Promise(resolve => setTimeout(resolve, 3000));
+          }
+        } else {
+          // If resolution failed and it's not "already resolved", throw error
+          if (!(resolveResult as any).alreadyResolved) {
+            throw new Error(resolveResult.error || "Failed to resolve bet");
+          }
         }
-        
-        toast({
-          title: "Bet Resolving...",
-          description: "Waiting for transaction confirmation...",
-        });
-        
-        // Wait a moment for the resolve transaction to be mined
-        await new Promise(resolve => setTimeout(resolve, 3000));
       } catch (resolveError: any) {
         console.error('Error resolving bet immediately:', resolveError);
-        // Fall back to polling if immediate resolution fails
-        toast({
-          variant: "default",
-          title: "Resolving via fallback...",
-          description: "Waiting for oracle to resolve your bet...",
-        });
+        // If error is "not pending" or "already resolved", that's okay - bet might be resolving
+        if (resolveError.message?.includes('not pending') || resolveError.message?.includes('already resolved')) {
+          console.log('[CoinFlip] Bet may already be resolving, continuing to poll...');
+          toast({
+            variant: "default",
+            title: "Checking bet status...",
+            description: "Bet may already be resolved, checking result...",
+          });
+        } else {
+          // Fall back to polling if immediate resolution fails for other reasons
+          toast({
+            variant: "default",
+            title: "Resolving via fallback...",
+            description: "Waiting for oracle to resolve your bet...",
+          });
+        }
       }
       
       // Wait for BetResolved event (either from immediate resolution or fallback)
