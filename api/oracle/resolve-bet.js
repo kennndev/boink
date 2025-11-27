@@ -68,10 +68,18 @@ export default async function handler(req, res) {
     const SERVER_SEED = process.env.SERVER_SEED;
     const CHAIN_ID = Number(process.env.CHAIN_ID || process.env.VITE_CHAIN_ID || 763373);
 
-    if (!RPC_URL || !PRIVATE_KEY || !CONTRACT_ADDRESS || !SERVER_SEED) {
+    const missingVars = [];
+    if (!RPC_URL) missingVars.push('RPC_URL');
+    if (!PRIVATE_KEY) missingVars.push('PRIVATE_KEY');
+    if (!CONTRACT_ADDRESS) missingVars.push('COINFLIP_ADDRESS');
+    if (!SERVER_SEED) missingVars.push('SERVER_SEED');
+    
+    if (missingVars.length > 0) {
       return res.status(500).json({ 
         error: 'Missing required environment variables',
-        required: ['RPC_URL', 'PRIVATE_KEY', 'COINFLIP_ADDRESS', 'SERVER_SEED']
+        missing: missingVars,
+        required: ['RPC_URL', 'PRIVATE_KEY', 'COINFLIP_ADDRESS', 'SERVER_SEED'],
+        message: `Please set the following environment variables in Vercel: ${missingVars.join(', ')}`
       });
     }
 
@@ -103,11 +111,13 @@ export default async function handler(req, res) {
     }
 
     // Get BetPlaced event to get clientSeed
-    const currentBlock = await provider.getBlockNumber();
-    const fromBlock = Math.max(Number(betInfo.placedAtBlock) - 100, 0);
+    // Use the exact block where bet was placed (or small range for safety)
+    const placedBlock = Number(betInfo.placedAtBlock);
+    const fromBlock = Math.max(placedBlock - 5, 0); // Small range around placed block
+    const toBlock = Math.min(placedBlock + 5, await provider.getBlockNumber());
     
     const filter = contract.filters.BetPlaced(betIdBigInt);
-    const events = await contract.queryFilter(filter, fromBlock, currentBlock);
+    const events = await contract.queryFilter(filter, fromBlock, toBlock);
     
     if (events.length === 0) {
       return res.status(404).json({ error: 'BetPlaced event not found' });
