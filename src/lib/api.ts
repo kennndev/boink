@@ -670,7 +670,7 @@ export async function getOracleStatus(): Promise<{ success: boolean; data?: Orac
  * Resolve bet immediately after placement (no 24/7 service needed)
  * This is called right after user places bet, eliminating need for polling
  */
-export async function resolveBetImmediately(betId: number | bigint | string): Promise<{ success: boolean; transactionHash?: string; error?: string }> {
+export async function resolveBetImmediately(betId: number | bigint | string): Promise<{ success: boolean; transactionHash?: string; error?: string; alreadyResolved?: boolean }> {
   try {
     const response = await fetch(`${API_BASE_URL}/oracle/resolve-bet`, {
       method: 'POST',
@@ -681,10 +681,28 @@ export async function resolveBetImmediately(betId: number | bigint | string): Pr
     });
     
     const data = await response.json();
+    
+    // Handle 400 error for "already resolved" - this is actually okay
+    if (response.status === 400 && data.status === 2) {
+      return {
+        success: true,
+        alreadyResolved: true,
+        error: data.message || 'Bet was already resolved'
+      };
+    }
+    
+    // Handle 200 success (including already resolved)
+    if (response.ok && data.success) {
+      return {
+        success: true,
+        transactionHash: data.transactionHash,
+        alreadyResolved: data.alreadyResolved || false
+      };
+    }
+    
     return {
-      success: data.success,
-      transactionHash: data.transactionHash,
-      error: data.error || data.message
+      success: false,
+      error: data.error || data.message || 'Failed to resolve bet'
     };
   } catch (error) {
     console.error('Error resolving bet:', error);
