@@ -26,8 +26,12 @@ export function getContractInstance() {
   const CONTRACT_ADDRESS = process.env.COINFLIP_ADDRESS;
   const CHAIN_ID = Number(process.env.CHAIN_ID || process.env.VITE_CHAIN_ID || 763373);
 
-  if (!RPC_URL || !CONTRACT_ADDRESS) {
-    throw new Error('RPC_URL and COINFLIP_ADDRESS must be set in environment variables');
+  const missingVars = [];
+  if (!RPC_URL) missingVars.push('RPC_URL');
+  if (!CONTRACT_ADDRESS) missingVars.push('COINFLIP_ADDRESS');
+  
+  if (missingVars.length > 0) {
+    throw new Error(`Missing required environment variables: ${missingVars.join(', ')}. Please set them in Vercel Dashboard → Settings → Environment Variables.`);
   }
 
   const provider = new ethers.JsonRpcProvider(RPC_URL, CHAIN_ID);
