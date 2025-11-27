@@ -4,11 +4,15 @@
   "framework": "vite",
   "rewrites": [
     {
-      "source": "/api/(?!oracle)(.*)",
+      "source": "/api/users/:path*",
       "destination": "/api/index.js"
     },
     {
-      "source": "/((?!api).*)",
+      "source": "/api/health",
+      "destination": "/api/index.js"
+    },
+    {
+      "source": "/(.*)",
       "destination": "/index.html"
     }
   ]
