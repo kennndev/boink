@@ -118,8 +118,16 @@ export const Referral = ({
         setAddress(userAddress);
         
         // Get signer for the connected address
-        const userSigner = await browserProvider.getSigner(userAddress);
+        // Use getSigner() without parameters to get the default signer (currently selected account)
+        const userSigner = await browserProvider.getSigner();
         setSigner(userSigner);
+        
+        // Verify the signer address matches connectedWallet
+        const signerAddress = await userSigner.getAddress();
+        if (signerAddress.toLowerCase() !== userAddress) {
+          console.warn(`Signer address (${signerAddress}) doesn't match connected wallet (${userAddress})`);
+          // Still continue, but log the warning
+        }
 
         const referralContract = new ethers.Contract(
           REFERRAL_REGISTRY_ADDRESS,
@@ -222,12 +230,34 @@ export const Referral = ({
 
   // Generate referral code
   const handleGenerateCode = async () => {
-    if (!contract || !signer || !address) {
+    // Check if wallet is connected first
+    if (!connectedWallet) {
       toast({
         variant: "destructive",
         title: "Error",
         description: "Please connect your wallet first",
       });
+      return;
+    }
+
+    // Check if still loading
+    if (isLoading) {
+      toast({
+        variant: "destructive",
+        title: "Please Wait",
+        description: "Initializing referral system...",
+      });
+      return;
+    }
+
+    // Check if contract/signer/address are initialized
+    if (!contract || !signer || !address) {
+      toast({
+        variant: "destructive",
+        title: "Error",
+        description: "Wallet connection not ready. Please try again in a moment.",
+      });
+      console.error("Referral initialization incomplete:", { contract: !!contract, signer: !!signer, address, connectedWallet });
       return;
     }
 
@@ -317,12 +347,34 @@ export const Referral = ({
 
   // Use referral code
   const handleUseCode = async (code: string) => {
-    if (!contract || !signer) {
+    // Check if wallet is connected first
+    if (!connectedWallet) {
       toast({
         variant: "destructive",
         title: "Error",
         description: "Please connect your wallet first",
       });
+      return;
+    }
+
+    // Check if still loading
+    if (isLoading) {
+      toast({
+        variant: "destructive",
+        title: "Please Wait",
+        description: "Initializing referral system...",
+      });
+      return;
+    }
+
+    // Check if contract/signer are initialized
+    if (!contract || !signer) {
+      toast({
+        variant: "destructive",
+        title: "Error",
+        description: "Wallet connection not ready. Please try again in a moment.",
+      });
+      console.error("Referral initialization incomplete:", { contract: !!contract, signer: !!signer, connectedWallet });
       return;
     }
 
