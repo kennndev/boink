@@ -296,18 +296,102 @@ export const Referral = ({
         description: "Waiting for confirmation...",
       });
 
-      await tx.wait();
+      const receipt = await tx.wait();
+      console.log("Transaction confirmed in block:", receipt.blockNumber);
 
-      // Get the new code
-      const newCode = await contract.codeOfReferrer(address!);
-      setMyCode(newCode);
-      setIsActive(true);
-      setTotalReferrals(0);
+      // Try to get the code from the transaction receipt logs first (most reliable)
+      let newCode = ethers.ZeroHash;
+      
+      try {
+        // Parse the ReferralCodeCreated event from the transaction receipt
+        if (receipt.logs && receipt.logs.length > 0) {
+          for (const log of receipt.logs) {
+            try {
+              const parsed = contract.interface.parseLog(log);
+              if (parsed && parsed.name === "ReferralCodeCreated") {
+                // Verify this event is for our address
+                if (parsed.args && parsed.args.referrer && 
+                    parsed.args.referrer.toLowerCase() === address!.toLowerCase() &&
+                    parsed.args.code) {
+                  newCode = parsed.args.code;
+                  console.log("Got referral code from transaction receipt event:", newCode);
+                  break;
+                }
+              }
+            } catch (parseError) {
+              // Not the event we're looking for, continue
+              continue;
+            }
+          }
+        }
+      } catch (eventError) {
+        console.warn("Error parsing events from receipt:", eventError);
+      }
 
-      toast({
-        title: "Success",
-        description: "Referral code generated successfully!",
-      });
+      // If we didn't get it from the receipt, try querying the contract
+      if (newCode === ethers.ZeroHash) {
+        // Wait a moment for RPC to index the new state
+        await new Promise(resolve => setTimeout(resolve, 1000));
+
+        // Poll for the new code with retries (RPC might not have indexed yet)
+        let attempts = 0;
+        const maxAttempts = 10;
+        
+        while (newCode === ethers.ZeroHash && attempts < maxAttempts) {
+          try {
+            newCode = await contract.codeOfReferrer(address!);
+            if (newCode !== ethers.ZeroHash) {
+              console.log("Referral code fetched from contract:", newCode);
+              break;
+            }
+          } catch (error) {
+            console.warn("Error fetching code, retrying...", error);
+          }
+          
+          attempts++;
+          if (newCode === ethers.ZeroHash && attempts < maxAttempts) {
+            // Wait before retrying
+            await new Promise(resolve => setTimeout(resolve, 500));
+          }
+        }
+
+        // Last resort: query events from the block
+        if (newCode === ethers.ZeroHash) {
+          try {
+            const filter = contract.filters.ReferralCodeCreated(address);
+            const events = await contract.queryFilter(filter, receipt.blockNumber, receipt.blockNumber);
+            if (events.length > 0) {
+              const event = events[0];
+              const parsed = contract.interface.parseLog(event);
+              if (parsed && parsed.args && parsed.args.code) {
+                newCode = parsed.args.code;
+                console.log("Got code from block events:", newCode);
+              }
+            }
+          } catch (eventError) {
+            console.error("Error fetching code from block events:", eventError);
+          }
+        }
+      }
+
+      if (newCode && newCode !== ethers.ZeroHash) {
+        setMyCode(newCode);
+        setIsActive(true);
+        setTotalReferrals(0);
+
+        toast({
+          title: "Success",
+          description: "Referral code generated successfully!",
+        });
+      } else {
+        // If we still don't have the code, show a warning but don't fail
+        console.warn("Could not fetch referral code immediately. It should appear after a page refresh.");
+        toast({
+          title: "Transaction Confirmed",
+          description: "Your referral code is being generated. Please refresh the page in a moment to see it.",
+          variant: "default",
+        });
+      }
     } catch (error: any) {
       console.error("Error generating code:", error);
       
