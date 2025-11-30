@@ -4,6 +4,10 @@
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 
   (import.meta.env.DEV ? 'http://localhost:3001/api' : '/api');
 
+// Bet resolver service URL (Heroku deployment for fast bet resolution)
+const BET_RESOLVER_URL = import.meta.env.VITE_BET_RESOLVER_URL || 
+  'https://cardify-club-f121a6960ade.herokuapp.com';
+
 export interface UserData {
   walletAddress: string;
   points: number;
@@ -669,10 +673,12 @@ export async function getOracleStatus(): Promise<{ success: boolean; data?: Orac
 /**
  * Resolve bet immediately after placement (no 24/7 service needed)
  * This is called right after user places bet, eliminating need for polling
+ * Uses Heroku-deployed bet resolver for fast resolution (no cold starts)
  */
 export async function resolveBetImmediately(betId: number | bigint | string): Promise<{ success: boolean; transactionHash?: string; error?: string; alreadyResolved?: boolean }> {
   try {
-    const response = await fetch(`${API_BASE_URL}/oracle/resolve-bet`, {
+    // Use Heroku bet resolver service for fast resolution
+    const response = await fetch(`${BET_RESOLVER_URL}/oracle/resolve-bet`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -681,15 +687,6 @@ export async function resolveBetImmediately(betId: number | bigint | string): Pr
     });
     
     const data = await response.json();
-    
-    // Handle 400 error for "already resolved" - this is actually okay
-    if (response.status === 400 && data.status === 2) {
-      return {
-        success: true,
-        alreadyResolved: true,
-        error: data.message || 'Bet was already resolved'
-      };
-    }
     
     // Handle 200 success (including already resolved)
     if (response.ok && data.success) {
@@ -700,6 +697,16 @@ export async function resolveBetImmediately(betId: number | bigint | string): Pr
       };
     }
     
+    // Handle 400 error for "already resolved" or "not pending" - check if it's already resolved
+    if (response.status === 400 && (data.status === 2 || data.alreadyResolved)) {
+      return {
+        success: true,
+        alreadyResolved: true,
+        error: data.message || 'Bet was already resolved'
+      };
+    }
+    
+    // Handle other errors
     return {
       success: false,
       error: data.error || data.message || 'Failed to resolve bet'
