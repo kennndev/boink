@@ -9,7 +9,7 @@ export const DesktopIcon = ({ icon, label, onClick }: DesktopIconProps) => {
     <button
       onClick={onClick}
       className="flex flex-col items-center gap-0.5 p-1 sm:p-2 hover:bg-primary/20 rounded transition-colors group 
-                 w-20 sm:w-24 md:w-28 touch-target"
+                 w-20 sm:w-24 md:w-28 touch-target flex-shrink-0"
     >
       <img
         src={icon}
