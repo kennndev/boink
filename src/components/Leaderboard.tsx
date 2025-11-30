@@ -7,6 +7,7 @@ const coinFlipABI = coinFlipArtifact as any;
 
 interface LeaderboardProps {
   connectedWallet: string | null;
+  connectedWalletName?: string | null;
   walletProviders: Record<string, any>;
 }
 
@@ -19,7 +20,7 @@ interface PlayerStats {
   winRate: number;
 }
 
-export const Leaderboard = ({ connectedWallet, walletProviders }: LeaderboardProps) => {
+export const Leaderboard = ({ connectedWallet, connectedWalletName, walletProviders }: LeaderboardProps) => {
   const [players, setPlayers] = useState<PlayerStats[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -31,8 +32,18 @@ export const Leaderboard = ({ connectedWallet, walletProviders }: LeaderboardPro
   const EXPECTED_CHAIN_ID = import.meta.env.VITE_CHAIN_ID || "763373";
 
   useEffect(() => {
-    if (connectedWallet && walletProviders[connectedWallet] && CONTRACT_ADDRESS) {
-      const ethereumProvider = walletProviders[connectedWallet];
+    if (connectedWallet && CONTRACT_ADDRESS) {
+      // Get provider by wallet name, or fallback to window.ethereum
+      const walletName = connectedWalletName || "MetaMask"; // Default to MetaMask if not specified
+      const ethereumProvider = walletProviders[walletName] || (window as any).ethereum;
+      
+      if (!ethereumProvider || typeof ethereumProvider.request !== "function") {
+        console.error("No wallet provider available");
+        setError("Wallet provider not available");
+        setLoading(false);
+        return;
+      }
+      
       const browserProvider = new ethers.BrowserProvider(ethereumProvider);
       setProvider(browserProvider);
 
@@ -92,9 +103,9 @@ export const Leaderboard = ({ connectedWallet, walletProviders }: LeaderboardPro
       setError(null);
       console.log("📊 Loading leaderboard...");
 
-      // Query FlipResult events to get all unique player addresses
+      // Query BetResolved events to get all unique player addresses
       console.log("🔍 Creating event filter...");
-      const filter = contract.filters.FlipResult();
+      const filter = contract.filters.BetResolved();
       
       // Get current block number and query from last 10000 blocks to avoid querying all history
       console.log("🔍 Getting current block number...");
@@ -119,13 +130,21 @@ export const Leaderboard = ({ connectedWallet, walletProviders }: LeaderboardPro
       events.forEach((event: any) => {
         try {
           const parsed = contract.interface.parseLog(event);
-          if (parsed && parsed.args && parsed.args.player) {
-            uniqueAddresses.add(parsed.args.player);
+          if (parsed && parsed.args) {
+            // BetResolved event args: [betId, player, guess, outcome, won, amount, payout, profit]
+            // Try accessing by name first, then by index
+            const player = parsed.args.player || parsed.args[1];
+            if (player) {
+              uniqueAddresses.add(player.toString());
+            }
           }
         } catch (e) {
           // Try direct access if parseLog fails
-          if (event.args && event.args.player) {
-            uniqueAddresses.add(event.args.player);
+          if (event.args) {
+            const player = event.args.player || event.args[1];
+            if (player) {
+              uniqueAddresses.add(player.toString());
+            }
           }
         }
       });
