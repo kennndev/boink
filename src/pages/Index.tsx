@@ -406,11 +406,11 @@ const Index = () => {
       chat: {
         title: "Chat",
         body: (
-          <div className="space-y-2 sm:space-y-4">
-            <h2 className="text-lg sm:text-2xl font-bold font-futuristic text-gradient-cyan">AI Chat Assistant</h2>
-            <p className="text-sm sm:text-base font-cyber text-gradient-orange">Connect with our AI-powered chat system to get help.</p>
-            <div className="win98-border-inset p-2 sm:p-4 min-h-[150px] sm:min-h-[200px]">
-              <p className="text-xs sm:text-sm font-retro text-muted-foreground">Chat interface coming soon...</p>
+          <div className="space-y-1.5 sm:space-y-4">
+            <h2 className="text-base sm:text-2xl font-bold font-futuristic text-gradient-cyan">AI Chat Assistant</h2>
+            <p className="text-xs sm:text-base font-cyber text-gradient-orange">Connect with our AI-powered chat system to get help.</p>
+            <div className="win98-border-inset p-2 sm:p-4 min-h-[120px] sm:min-h-[200px]">
+              <p className="text-[10px] sm:text-sm font-retro text-muted-foreground">Chat interface coming soon...</p>
             </div>
           </div>
         ),
@@ -418,23 +418,24 @@ const Index = () => {
       leaderboard: {
         title: "Onchain Leaderboard",
         body: (
-          <div className="space-y-2 sm:space-y-4">
+          <div className="space-y-1.5 sm:space-y-4">
             {connectedWallet ? (
               <Leaderboard 
-                connectedWallet={connectedWallet} 
+                connectedWallet={connectedWallet}
+                connectedWalletName={connectedWalletName}
                 walletProviders={walletProviders} 
               />
             ) : (
-              <div className="text-center space-y-4">
-                <h2 className="text-lg sm:text-2xl font-bold font-military text-gradient-emerald">
+              <div className="text-center space-y-2 sm:space-y-4">
+                <h2 className="text-base sm:text-2xl font-bold font-military text-gradient-emerald">
                   🏆 Onchain Leaderboard 🏆
                 </h2>
-                <p className="text-sm sm:text-base font-cyber text-gradient-red">
+                <p className="text-xs sm:text-base font-cyber text-gradient-red">
                   Connect your wallet to view the leaderboard!
                 </p>
-                <div className="win98-border p-4 bg-secondary">
-                  <p className="text-center text-sm sm:text-lg font-pixel">Connect Wallet Required</p>
-                  <p className="text-center text-xs sm:text-sm mt-2 font-retro">
+                <div className="win98-border p-2 sm:p-4 bg-secondary">
+                  <p className="text-center text-xs sm:text-lg font-pixel">Connect Wallet Required</p>
+                  <p className="text-center text-[10px] sm:text-sm mt-1.5 sm:mt-2 font-retro">
                     Click the wallet icon in the taskbar to connect
                   </p>
                 </div>
@@ -446,7 +447,7 @@ const Index = () => {
       mint: {
         title: "Coin Flip",
         body: (
-          <div className="space-y-2 sm:space-y-4">
+          <div className="space-y-1.5 sm:space-y-4">
             {connectedWallet ? (
               <CoinFlip 
                 connectedWallet={connectedWallet} 
@@ -454,16 +455,16 @@ const Index = () => {
                 walletProviders={walletProviders} 
               />
             ) : (
-              <div className="text-center space-y-4">
-                <h2 className="text-lg sm:text-2xl font-bold font-military text-gradient-emerald">
+              <div className="text-center space-y-2 sm:space-y-4">
+                <h2 className="text-base sm:text-2xl font-bold font-military text-gradient-emerald">
                   🪙 Coin Flip Game 🪙
                 </h2>
-                <p className="text-sm sm:text-base font-cyber text-gradient-red">
+                <p className="text-xs sm:text-base font-cyber text-gradient-red">
                   Connect your wallet to start playing!
                 </p>
-                <div className="win98-border p-4 bg-secondary">
-                  <p className="text-center text-sm sm:text-lg font-pixel">Connect Wallet Required</p>
-                  <p className="text-center text-xs sm:text-sm mt-2 font-retro">
+                <div className="win98-border p-2 sm:p-4 bg-secondary">
+                  <p className="text-center text-xs sm:text-lg font-pixel">Connect Wallet Required</p>
+                  <p className="text-center text-[10px] sm:text-sm mt-1.5 sm:mt-2 font-retro">
                     Click the wallet icon in the taskbar to connect
                   </p>
                 </div>
@@ -499,11 +500,11 @@ const Index = () => {
       dashboard: {
         title: "Photos",
         body: (
-          <div className="space-y-2 sm:space-y-4">
-            <h2 className="text-lg sm:text-2xl font-bold font-bold-gaming text-gradient-blue">Photo Album</h2>
-            <p className="text-sm sm:text-base font-cyber text-gradient-green">Browse through your collection of memories and adventures.</p>
-            <div className="win98-border-inset p-2 sm:p-4 min-h-[200px] sm:min-h-[300px] overflow-auto">
-              <div className="grid grid-cols-2 sm:grid-cols-3 gap-2 sm:gap-4">
+          <div className="space-y-1.5 sm:space-y-4">
+            <h2 className="text-base sm:text-2xl font-bold font-bold-gaming text-gradient-blue">Photo Album</h2>
+            <p className="text-xs sm:text-base font-cyber text-gradient-green">Browse through your collection of memories and adventures.</p>
+            <div className="win98-border-inset p-1.5 sm:p-4 min-h-[150px] sm:min-h-[300px] overflow-auto">
+              <div className="grid grid-cols-2 sm:grid-cols-3 gap-1.5 sm:gap-4">
                 {[
                   { src: EiffelImage, name: "Eiffel Tower", alt: "2000s Eiffel Tower" },
                   { src: HawaiiImage, name: "Hawaii", alt: "Hawaii Beach" },
@@ -511,14 +512,14 @@ const Index = () => {
                   { src: RomeImage, name: "Rome", alt: "Ancient Rome" },
                   { src: ShaolinImage, name: "Shaolin", alt: "Shaolin Temple" },
                 ].map((photo, index) => (
-                  <div key={index} className="win98-border p-1 sm:p-2 hover:bg-secondary cursor-pointer group">
+                  <div key={index} className="win98-border p-0.5 sm:p-2 hover:bg-secondary cursor-pointer group touch-target">
                     <img 
                       src={photo.src} 
                       alt={photo.alt}
-                      className="w-full h-20 sm:h-24 object-cover mb-1 sm:mb-2"
+                      className="w-full h-16 sm:h-24 object-cover mb-0.5 sm:mb-2"
                       onClick={() => setShowImageModal({ src: photo.src, alt: photo.alt })}
                     />
-                    <p className="text-xs font-pixel text-center text-muted-foreground group-hover:text-foreground">
+                    <p className="text-[9px] sm:text-xs font-pixel text-center text-muted-foreground group-hover:text-foreground leading-tight">
                       {photo.name}
                     </p>
                   </div>
@@ -531,23 +532,23 @@ const Index = () => {
       winamp: {
         title: "Music Player",
         body: (
-          <div className="space-y-2 sm:space-y-4">
-            <h2 className="text-lg sm:text-2xl font-bold font-army text-gradient-orange">Music Player</h2>
-            <p className="text-sm sm:text-base font-cyber text-gradient-purple">Play your favorite tunes while gaming! Customize your audio experience.</p>
+          <div className="space-y-1.5 sm:space-y-4">
+            <h2 className="text-base sm:text-2xl font-bold font-army text-gradient-orange">Music Player</h2>
+            <p className="text-xs sm:text-base font-cyber text-gradient-purple">Play your favorite tunes while gaming! Customize your audio experience.</p>
             
             {/* Music Player */}
-            <div className="win98-border-inset p-2 sm:p-4">
-              <div className="text-center space-y-2 sm:space-y-4">
-                <div className="text-4xl sm:text-6xl">🎵</div>
-                <p className="text-sm sm:text-base font-pixel text-gradient-cyan">Music Player</p>
-                <p className="text-sm sm:text-base font-retro text-muted-foreground">
+            <div className="win98-border-inset p-1.5 sm:p-4">
+              <div className="text-center space-y-1.5 sm:space-y-4">
+                <div className="text-3xl sm:text-6xl">🎵</div>
+                <p className="text-xs sm:text-base font-pixel text-gradient-cyan">Music Player</p>
+                <p className="text-[10px] sm:text-base font-retro text-muted-foreground leading-tight px-1">
                   {currentTrack ? `Now Playing: ${currentTrack}` : "Select a track to play"}
                 </p>
                 
                 {/* Volume Control */}
-                <div className="win98-border p-2 sm:p-3 bg-secondary">
-                  <div className="flex items-center justify-center space-x-2 mb-2">
-                    <span className="text-xs sm:text-sm font-pixel text-blue-500">Volume:</span>
+                <div className="win98-border p-1.5 sm:p-3 bg-secondary">
+                  <div className="flex items-center justify-center space-x-1.5 sm:space-x-2 mb-1.5 sm:mb-2">
+                    <span className="text-[10px] sm:text-sm font-pixel text-blue-500">Volume:</span>
                     <input
                       type="range"
                       min="0"
@@ -561,16 +562,16 @@ const Index = () => {
                           audioRef.volume = newVolume;
                         }
                       }}
-                      className="w-20 sm:w-32"
+                      className="w-16 sm:w-32 touch-target"
                     />
-                    <span className="text-xs sm:text-sm font-pixel text-blue-500">{Math.round(volume * 100)}%</span>
+                    <span className="text-[10px] sm:text-sm font-pixel text-blue-500">{Math.round(volume * 100)}%</span>
                   </div>
                 </div>
                 
-                <div className="win98-border p-2 sm:p-3 bg-secondary">
-                  <div className="flex items-center justify-center space-x-2">
+                <div className="win98-border p-1.5 sm:p-3 bg-secondary">
+                  <div className="flex items-center justify-center space-x-1.5 sm:space-x-2">
                     <button 
-                      className="win98-border-inset p-1 text-xs font-pixel text-blue-500 hover:bg-gray-200"
+                      className="win98-border-inset p-1.5 sm:p-1 text-xs font-pixel text-blue-500 hover:bg-gray-200 touch-target min-h-[36px] min-w-[36px]"
                       onClick={() => {
                         if (audioRef && currentTrack) {
                           const currentIndex = musicTracks.findIndex(track => track.name === currentTrack);
@@ -588,7 +589,7 @@ const Index = () => {
                       ⏮
                     </button>
                     <button 
-                      className="win98-border-inset p-1 text-xs font-pixel text-blue-500 hover:bg-gray-200"
+                      className="win98-border-inset p-1.5 sm:p-1 text-xs font-pixel text-blue-500 hover:bg-gray-200 touch-target min-h-[36px] min-w-[36px]"
                       onClick={() => {
                         if (audioRef) {
                           if (isPlaying) {
@@ -605,7 +606,7 @@ const Index = () => {
                       {isPlaying ? "⏸" : "▶"}
                     </button>
                     <button 
-                      className="win98-border-inset p-1 text-xs font-pixel text-blue-500 hover:bg-gray-200"
+                      className="win98-border-inset p-1.5 sm:p-1 text-xs font-pixel text-blue-500 hover:bg-gray-200 touch-target min-h-[36px] min-w-[36px]"
                       onClick={() => {
                         if (audioRef && currentTrack) {
                           const currentIndex = musicTracks.findIndex(track => track.name === currentTrack);
@@ -628,13 +629,13 @@ const Index = () => {
             </div>
 
             {/* Playlist */}
-            <div className="win98-border-inset p-2 sm:p-4 min-h-[150px] sm:min-h-[200px] overflow-auto">
-              <h3 className="text-sm sm:text-base font-bold font-military text-gradient-blue mb-2 sm:mb-3">Playlist</h3>
+            <div className="win98-border-inset p-1.5 sm:p-4 min-h-[120px] sm:min-h-[200px] overflow-auto">
+              <h3 className="text-xs sm:text-base font-bold font-military text-gradient-blue mb-1.5 sm:mb-3">Playlist</h3>
               <div className="space-y-1 sm:space-y-2">
                 {musicTracks.map((track, index) => (
                   <div 
                     key={index} 
-                    className={`win98-border p-2 sm:p-3 flex items-center justify-between cursor-pointer hover:bg-secondary ${
+                    className={`win98-border p-1.5 sm:p-3 flex items-center justify-between cursor-pointer hover:bg-secondary touch-target min-h-[44px] ${
                       currentTrack === track.name ? 'bg-accent text-white' : ''
                     }`}
                     onClick={() => {
@@ -647,12 +648,12 @@ const Index = () => {
                       }
                     }}
                   >
-                    <div className="flex items-center space-x-2 text-blue-500">
-                      <span className="text-sm font-pixel text-blue-500">{index + 1}.</span>
-                      <span className="text-sm sm:text-base font-retro text-blue-500">{track.name}</span>
+                    <div className="flex items-center space-x-1.5 sm:space-x-2 text-blue-500 min-w-0 flex-1">
+                      <span className="text-xs sm:text-sm font-pixel text-blue-500 flex-shrink-0">{index + 1}.</span>
+                      <span className="text-xs sm:text-base font-retro text-blue-500 truncate">{track.name}</span>
                     </div>
                     <button 
-                      className="text-sm font-pixel text-blue-500"
+                      className="text-xs sm:text-sm font-pixel text-blue-500 touch-target min-w-[32px] flex-shrink-0"
                       onClick={(e) => {
                         e.stopPropagation();
                         if (audioRef) {
@@ -889,27 +890,27 @@ const Index = () => {
     ];
 
     return (
-    <div className="fixed inset-0 flex items-center justify-center z-50 p-2 sm:p-4">
-      <div className="bg-gray-300 win98-border w-[min(92vw,360px)] sm:w-[min(80vw,480px)] max-h-[90vh] sm:max-h-[80vh] flex flex-col shadow-2xl box-border overflow-hidden">
+    <div className="fixed inset-0 flex items-center justify-center z-50 p-1 sm:p-4">
+      <div className="bg-gray-300 win98-border w-[min(95vw,360px)] sm:w-[min(80vw,480px)] max-h-[95vh] sm:max-h-[80vh] flex flex-col shadow-2xl box-border overflow-hidden">
         {/* Title Bar */}
-        <div className="h-8 bg-gray-300 win98-border-inset flex items-center justify-between px-2 overflow-hidden">
-          <span className="text-black font-bold text-xs sm:text-sm font-military truncate flex-1 mr-2">
+        <div className="h-7 sm:h-8 bg-gray-300 win98-border-inset flex items-center justify-between px-1.5 sm:px-2 overflow-hidden">
+          <span className="text-black font-bold text-[10px] sm:text-sm font-military truncate flex-1 mr-1 sm:mr-2">
             Connect a Wallet
           </span>
           <button
             onClick={() => setShowWalletModal(false)}
-            className="h-6 w-6 win98-border flex items-center justify-center hover:bg-gray-400 flex-shrink-0"
+            className="h-5 w-5 sm:h-6 sm:w-6 win98-border flex items-center justify-center hover:bg-gray-400 flex-shrink-0 touch-target"
           >
-            <span className="text-xs font-bold font-pixel text-gray-700">×</span>
+            <span className="text-[10px] sm:text-xs font-bold font-pixel text-gray-700">×</span>
           </button>
         </div>
 
         {/* Modal Content */}
-        <div className="flex-1 bg-gray-300 p-2 sm:p-4 overflow-y-auto min-h-0">
+        <div className="flex-1 bg-gray-300 p-1.5 sm:p-4 overflow-y-auto min-h-0" style={{ WebkitOverflowScrolling: 'touch' }}>
           {/* Mobile Instructions */}
           {isMobile && installedWallets.length === 0 && (
-            <div className="win98-border bg-yellow-100 p-3 mb-4">
-              <p className="text-xs font-retro text-gray-800">
+            <div className="win98-border bg-yellow-100 p-2 sm:p-3 mb-2 sm:mb-4">
+              <p className="text-[10px] sm:text-xs font-retro text-gray-800 leading-tight">
                 📱 <strong>Mobile User?</strong> Click a wallet below to open this page in that wallet's browser.
               </p>
             </div>
@@ -917,22 +918,22 @@ const Index = () => {
           
           {/* Installed Section */}
             {installedWallets.length > 0 && (
-          <div className="space-y-3">
-                <h3 className="text-blue-600 font-medium text-sm font-futuristic">
+          <div className="space-y-2 sm:space-y-3">
+                <h3 className="text-blue-600 font-medium text-xs sm:text-sm font-futuristic">
                   Detected Wallets ({installedWallets.length})
                 </h3>
-            <div className="space-y-2">
+            <div className="space-y-1.5 sm:space-y-2">
                   {installedWallets.map((wallet) => (
               <div 
                       key={wallet.name}
-                className="win98-border-inset p-3 flex items-center gap-3 hover:bg-gray-100 cursor-pointer"
+                className="win98-border-inset p-2 sm:p-3 flex items-center gap-2 sm:gap-3 hover:bg-gray-100 cursor-pointer touch-target min-h-[44px]"
                       onClick={() => handleWalletConnect(wallet.name)}
               >
-                      <div className={`w-8 h-8 ${wallet.color} flex items-center justify-center win98-border`}>
-                        <span className="text-white text-xs font-bold">{wallet.icon}</span>
+                      <div className={`w-7 h-7 sm:w-8 sm:h-8 ${wallet.color} flex items-center justify-center win98-border flex-shrink-0`}>
+                        <span className="text-white text-[10px] sm:text-xs font-bold">{wallet.icon}</span>
                 </div>
-                      <span className="text-sm font-medium text-black font-cyber">{wallet.name}</span>
-                      <div className="ml-auto w-2 h-2 bg-green-500 rounded-full"></div>
+                      <span className="text-xs sm:text-sm font-medium text-black font-cyber flex-1 truncate">{wallet.name}</span>
+                      <div className="ml-auto w-1.5 h-1.5 sm:w-2 sm:h-2 bg-green-500 rounded-full flex-shrink-0"></div>
               </div>
                   ))}
                 </div>
@@ -941,22 +942,22 @@ const Index = () => {
           
           {/* Mobile Wallets Section */}
           {mobileWallets.length > 0 && (
-            <div className="space-y-3 mt-6">
-              <h3 className="text-blue-600 font-medium text-sm font-futuristic">
+            <div className="space-y-2 sm:space-y-3 mt-4 sm:mt-6">
+              <h3 className="text-blue-600 font-medium text-xs sm:text-sm font-futuristic">
                 Open in Wallet App
               </h3>
-              <div className="space-y-2">
+              <div className="space-y-1.5 sm:space-y-2">
                 {mobileWallets.map((wallet) => (
                   <div 
                     key={wallet.name}
-                    className="win98-border-inset p-3 flex items-center gap-3 hover:bg-gray-100 cursor-pointer"
+                    className="win98-border-inset p-2 sm:p-3 flex items-center gap-2 sm:gap-3 hover:bg-gray-100 cursor-pointer touch-target min-h-[44px]"
                     onClick={() => handleWalletConnect(wallet.name)}
                   >
-                    <div className={`w-8 h-8 ${wallet.color} flex items-center justify-center win98-border`}>
-                      <span className="text-white text-xs font-bold">{wallet.icon}</span>
+                    <div className={`w-7 h-7 sm:w-8 sm:h-8 ${wallet.color} flex items-center justify-center win98-border flex-shrink-0`}>
+                      <span className="text-white text-[10px] sm:text-xs font-bold">{wallet.icon}</span>
                     </div>
-                    <span className="text-sm font-medium text-black font-cyber">{wallet.name}</span>
-                    <span className="ml-auto text-xs text-gray-600">→</span>
+                    <span className="text-xs sm:text-sm font-medium text-black font-cyber flex-1 truncate">{wallet.name}</span>
+                    <span className="ml-auto text-[10px] sm:text-xs text-gray-600 flex-shrink-0">→</span>
                   </div>
                 ))}
               </div>
@@ -964,31 +965,31 @@ const Index = () => {
           )}
 
           {/* Recommended Section */}
-          <div className="space-y-3 mt-6">
-              <h3 className="text-gray-600 font-medium text-sm font-futuristic">Recommended</h3>
-            <div className="space-y-2">
+          <div className="space-y-2 sm:space-y-3 mt-4 sm:mt-6">
+              <h3 className="text-gray-600 font-medium text-xs sm:text-sm font-futuristic">Recommended</h3>
+            <div className="space-y-1.5 sm:space-y-2">
                 {recommendedWallets.map((wallet) => (
                   <div 
                     key={wallet.name}
-                    className={`win98-border-inset p-3 flex items-center gap-3 ${
+                    className={`win98-border-inset p-2 sm:p-3 flex items-center gap-2 sm:gap-3 touch-target min-h-[44px] ${
                       wallet.available ? 'hover:bg-gray-100 cursor-pointer' : 'opacity-50 cursor-not-allowed'
                     }`}
                     onClick={() => wallet.available ? handleWalletConnect(wallet.name) : null}
                   >
-                    <div className={`w-8 h-8 ${wallet.color} flex items-center justify-center win98-border`}>
-                      <span className="text-white text-xs font-bold">{wallet.icon}</span>
+                    <div className={`w-7 h-7 sm:w-8 sm:h-8 ${wallet.color} flex items-center justify-center win98-border flex-shrink-0`}>
+                      <span className="text-white text-[10px] sm:text-xs font-bold">{wallet.icon}</span>
                 </div>
-                    <div className="flex-1">
-                      <span className="text-sm font-medium text-black font-cyber">{wallet.name}</span>
+                    <div className="flex-1 min-w-0">
+                      <span className="text-xs sm:text-sm font-medium text-black font-cyber block truncate">{wallet.name}</span>
                       {(wallet as any).description && (
-                        <p className="text-xs text-gray-600 font-retro">{(wallet as any).description}</p>
+                        <p className="text-[10px] sm:text-xs text-gray-600 font-retro truncate">{(wallet as any).description}</p>
                       )}
                     </div>
                     {!wallet.available && (
-                      <span className="ml-auto text-xs text-gray-500 font-retro">Coming Soon</span>
+                      <span className="ml-auto text-[10px] sm:text-xs text-gray-500 font-retro flex-shrink-0">Coming Soon</span>
                     )}
                     {wallet.available && wallet.name === 'WalletConnect' && (
-                      <span className="ml-auto text-xs text-blue-600 font-pixel">→</span>
+                      <span className="ml-auto text-[10px] sm:text-xs text-blue-600 font-pixel flex-shrink-0">→</span>
                     )}
               </div>
                 ))}
@@ -997,16 +998,16 @@ const Index = () => {
 
             {/* No wallets detected message */}
             {installedWallets.length === 0 && (
-              <div className="mt-6 p-4 win98-border-inset bg-gray-200">
-                <p className="text-sm text-black text-center font-retro">
+              <div className="mt-4 sm:mt-6 p-2 sm:p-4 win98-border-inset bg-gray-200">
+                <p className="text-[10px] sm:text-sm text-black text-center font-retro leading-tight">
                   No wallet extensions detected. Please install a wallet extension like MetaMask, Rabby, or Phantom to continue.
                 </p>
           </div>
             )}
 
           {/* Footer */}
-          <div className="mt-6 pt-4 border-t border-gray-400">
-            <p className="text-xs text-black font-retro">
+          <div className="mt-4 sm:mt-6 pt-2 sm:pt-4 border-t border-gray-400">
+            <p className="text-[10px] sm:text-xs text-black font-retro text-center">
               New to Ethereum wallets?{" "}
               <a href="#" className="text-blue-600 underline hover:text-blue-800 font-cyber">
                 Learn More
@@ -1026,7 +1027,7 @@ const Index = () => {
       {/* Desktop Area */}
       <main className="relative flex-1 overflow-hidden">
         {/* Desktop Icons – Single column that wraps to next column when needed */}
-        <div className="absolute left-1 sm:left-4 top-1 sm:top-2 bottom-12 z-10 pointer-events-auto pr-1" style={{ maxHeight: 'calc(100vh - 60px)', columns: '1 auto', columnGap: '1rem' } as React.CSSProperties}>
+        <div className="absolute left-1 sm:left-4 top-1 sm:top-2 bottom-12 z-10 pointer-events-auto pr-1 sm:pr-1" style={{ maxHeight: 'calc(100vh - 60px)', columns: '1 auto', columnGap: '0.75rem' } as React.CSSProperties}>
           {/* CSS columns: automatically creates 2nd column when content overflows */}
           {desktopApps.map((app) => (
             <div key={app.id} style={{ breakInside: 'avoid', marginBottom: '0.5rem' } as React.CSSProperties}>
@@ -1045,13 +1046,13 @@ const Index = () => {
             <h1
               className="
                 uppercase font-pixel font-bold tracking-wider leading-none text-center
-                max-sm:text-[clamp(2rem,20vw,2.5rem)]
+                text-[clamp(1.5rem,15vw,2rem)]
                 sm:text-[clamp(2.5rem,10vw,4rem)]
                 md:text-[clamp(3rem,8vw,5rem)]
                 lg:text-[clamp(3.5rem,7vw,6rem)]
                 xl:text-[clamp(4rem,6vw,7rem)]
-                px-4
-                max-sm:mt-8 sm:mt-12 md:mt-16 lg:mt-20
+                px-2 sm:px-4
+                mt-4 sm:mt-12 md:mt-16 lg:mt-20
               "
               style={{
                 color: '#815bf9',
@@ -1118,25 +1119,25 @@ const Index = () => {
 
       {/* Image Modal */}
       {showImageModal && (
-        <div className="fixed inset-0 flex items-center justify-center z-50 p-2 sm:p-4 bg-black bg-opacity-75">
-          <div className="relative max-w-4xl max-h-[90vh] bg-gray-300 win98-border shadow-2xl overflow-hidden">
+        <div className="fixed inset-0 flex items-center justify-center z-50 p-1 sm:p-4 bg-black bg-opacity-75">
+          <div className="relative w-[95vw] sm:max-w-4xl max-h-[95vh] sm:max-h-[90vh] bg-gray-300 win98-border shadow-2xl overflow-hidden">
             {/* Title Bar */}
-            <div className="h-8 bg-gray-300 win98-border-inset flex items-center justify-between px-2 overflow-hidden">
-              <span className="text-black font-bold text-xs sm:text-sm font-military truncate flex-1 mr-2">{showImageModal.alt}</span>
+            <div className="h-7 sm:h-8 bg-gray-300 win98-border-inset flex items-center justify-between px-1.5 sm:px-2 overflow-hidden">
+              <span className="text-black font-bold text-[10px] sm:text-sm font-military truncate flex-1 mr-1 sm:mr-2">{showImageModal.alt}</span>
               <button
                 onClick={() => setShowImageModal(null)}
-                className="h-6 w-6 win98-border flex items-center justify-center hover:bg-gray-400 flex-shrink-0"
+                className="h-5 w-5 sm:h-6 sm:w-6 win98-border flex items-center justify-center hover:bg-gray-400 flex-shrink-0 touch-target"
               >
-                <span className="text-xs font-bold font-pixel">×</span>
+                <span className="text-[10px] sm:text-xs font-bold font-pixel">×</span>
               </button>
             </div>
             
             {/* Image Content */}
-            <div className="p-2 sm:p-4">
+            <div className="p-1 sm:p-4">
               <img 
                 src={showImageModal.src} 
                 alt={showImageModal.alt}
-                className="max-w-full max-h-[70vh] object-contain mx-auto"
+                className="max-w-full max-h-[85vh] sm:max-h-[70vh] object-contain mx-auto"
               />
             </div>
           </div>
