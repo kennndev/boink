@@ -1025,57 +1025,42 @@ const Index = () => {
     <div className="h-screen w-screen flex flex-col overflow-hidden">
       {/* Desktop Area */}
       <main className="relative flex-1 overflow-hidden">
-        {/* Desktop Icons – pinned left; tighter spacing on mobile */}
-        <div className="absolute left-1 sm:left-4 top-1 sm:top-2 bottom-12 z-10 flex flex-row md:flex-row gap-2 sm:gap-3 md:gap-4 pointer-events-auto lg:overflow-visible pr-1">
-          {/* Mobile: Single column - one icon per line */}
-          <div className="md:hidden flex flex-col gap-2 sm:gap-3">
-            {desktopApps.map((app) => (
+        {/* Desktop Icons – Single column that wraps to next column when needed */}
+        <div className="absolute left-1 sm:left-4 top-1 sm:top-2 bottom-12 z-10 pointer-events-auto pr-1" style={{ maxHeight: 'calc(100vh - 60px)', columns: '1 auto', columnGap: '1rem' } as React.CSSProperties}>
+          {/* CSS columns: automatically creates 2nd column when content overflows */}
+          {desktopApps.map((app) => (
+            <div key={app.id} style={{ breakInside: 'avoid', marginBottom: '0.5rem' } as React.CSSProperties}>
               <DesktopIcon
-                key={app.id}
                 icon={app.icon}
                 label={app.label}
                 onClick={() => handleIconClick(app.id)}
               />
-            ))}
-          </div>
-          {/* Desktop: Single column layout */}
-          <div className="hidden md:flex flex-col sm:gap-2">
-            {desktopApps.map((app) => (
-              <DesktopIcon
-                key={app.id}
-                icon={app.icon}
-                label={app.label}
-                onClick={() => handleIconClick(app.id)}
-              />
-            ))}
-          </div>
+            </div>
+          ))}
         </div>
 
-        {/* Centered wallpaper + BOINK below icons */}
+        {/* Centered wallpaper + BOINK - positioned to avoid icon overlap */}
         <div className="absolute inset-0 flex items-center justify-center z-0 pointer-events-none">
-          <div className="relative">
-       {/*     <img 
-              src={WallpaperImage} 
-              alt="Desktop Wallpaper" 
-              className="w-64 h-48 sm:w-80 sm:h-60 md:w-[30rem] md:h-[21rem] lg:w-[40rem] lg:h-[24rem] object-cover rounded-lg shadow-lg"
-            /> */}
-<h1
-  className="
-    absolute left-1/2 -translate-x-1/2 uppercase font-pixel font-bold tracking-wider leading-none
-    max-sm:-top-14 sm:-top-16 md:-top-20 lg:-top-24
-    max-sm:text-[clamp(2.25rem,24vw,2.50rem)]
-    sm:text-[clamp(2rem,8vw,4.5rem)]
-    md:text-[clamp(2.5rem,7vw,5rem)]
-  "
-  style={{
-    color: '#815bf9',
-    letterSpacing: '0.05em',
-    textShadow: '0 2px 0 rgba(0,0,0,0.45)',
-  }}
->
-  BOINK
-</h1>
-
+          <div className="relative w-full">
+            <h1
+              className="
+                uppercase font-pixel font-bold tracking-wider leading-none text-center
+                max-sm:text-[clamp(2rem,20vw,2.5rem)]
+                sm:text-[clamp(2.5rem,10vw,4rem)]
+                md:text-[clamp(3rem,8vw,5rem)]
+                lg:text-[clamp(3.5rem,7vw,6rem)]
+                xl:text-[clamp(4rem,6vw,7rem)]
+                px-4
+                max-sm:mt-8 sm:mt-12 md:mt-16 lg:mt-20
+              "
+              style={{
+                color: '#815bf9',
+                letterSpacing: '0.05em',
+                textShadow: '0 2px 0 rgba(0,0,0,0.45)',
+              }}
+            >
+              BOINK
+            </h1>
           </div>
         </div>
       </main>
