@@ -557,110 +557,200 @@ export const CoinFlip = ({ connectedWallet, connectedWalletName, walletProviders
         description: "Resolving...",
       });
       
-      // OPTIMIZATION 5: Call backend immediately with clientSeed (no delay)
-      const resolvePromise = resolveBetImmediately(betId, userSeed);
+      // OPTIMIZATION: Call backend and use outcome immediately (no waiting for chain)
+      const resolveResult = await resolveBetImmediately(betId, userSeed);
       
-      // OPTIMIZATION 6: Start polling immediately in parallel (saves ~1s)
-      const MAX_WAIT_TIME = 30000; // Reduced from 60s
-      const POLL_INTERVAL = 250; // Reduced from 500ms for faster detection
-      const startTime = Date.now();
-      let resolved = false;
-      
-      // OPTIMIZATION 7: Parallel resolution - backend call + polling
-      await Promise.race([
-        resolvePromise,
-        new Promise(resolve => setTimeout(resolve, 100)) // Don't block on backend call
-      ]);
-      
-      // OPTIMIZATION 8: Use simpler status check instead of full bet info
-      while (!resolved && (Date.now() - startTime) < MAX_WAIT_TIME) {
-        await new Promise(resolve => setTimeout(resolve, POLL_INTERVAL));
+      // Handle already-resolved case (shouldn't happen for new bets, but handle gracefully)
+      if (resolveResult.success && resolveResult.alreadyResolved && resolveResult.outcome !== undefined) {
+        const outcomeSide = resolveResult.outcome === 0 ? "heads" : "tails" as "heads" | "tails";
+        const won = (currentGuess === outcomeSide);
         
-        try {
-          // OPTIMIZATION 9: Only check status field (not full bet info)
-          const betInfo = await contract.bets(betId);
-          const status = Number(betInfo.status);
+        setAnimationResult(outcomeSide);
+        await new Promise(res => setTimeout(res, 1500));
+        
+        setLastResult({
+          guess: currentGuess,
+          outcome: outcomeSide,
+          won,
+        });
+        
+        setShowAnimation(false);
+        loadUserStats(contract).catch(() => {});
+        
+        if (won) {
+          toast({
+            title: "🎉 You Won!",
+            description: hasAmountFlip ? `Payout: ${expectedPayout} USDC` : `You correctly guessed ${outcomeSide}!`,
+          });
+        } else {
+          toast({
+            variant: "destructive",
+            title: "You Lost",
+            description: `The outcome was ${outcomeSide}`,
+          });
+        }
+        return; // Exit early
+      }
+      
+      if (!resolveResult.success) {
+        // Fallback: try to poll on-chain as backup
+        console.warn("Backend resolution failed, falling back to on-chain polling:", resolveResult.error);
+        
+        const MAX_WAIT_TIME = 30000;
+        const POLL_INTERVAL = 2000;
+        const startTime = Date.now();
+        let resolved = false;
+        
+        while (!resolved && (Date.now() - startTime) < MAX_WAIT_TIME) {
+          await new Promise(resolve => setTimeout(resolve, POLL_INTERVAL));
           
-          if (status === 2) { // SETTLED
-            resolved = true;
+          try {
+            const betInfo = await contract.bets(betId);
+            const status = Number(betInfo.status);
             
-            // OPTIMIZATION 10: Query events in minimal range
-            const currentBlock = await provider.getBlockNumber();
-            const placedBlock = Number(betInfo.placedAtBlock);
-            const fromBlock = Math.max(placedBlock, receipt.blockNumber);
-            const toBlock = Math.min(placedBlock + 5, currentBlock);
-            
-            const filter = contract.filters.BetResolved(betId);
-            const events = await contract.queryFilter(filter, fromBlock, toBlock);
-            
-            if (events.length > 0) {
-              const event = events[events.length - 1];
-              const parsed = contract.interface.parseLog(event);
+            if (status === 2) { // SETTLED
+              resolved = true;
+              const currentBlock = await provider.getBlockNumber();
+              const placedBlock = Number(betInfo.placedAtBlock);
+              const fromBlock = Math.max(placedBlock, receipt.blockNumber);
+              const toBlock = Math.min(placedBlock + 5, currentBlock);
               
-              const outcomeNum = Number(parsed.args[3]);
-              const wonRaw = parsed.args[4];
-              const payoutTotal = parsed.args[6];
+              const filter = contract.filters.BetResolved(betId);
+              const events = await contract.queryFilter(filter, fromBlock, toBlock);
               
-              const won = typeof wonRaw === 'boolean' ? wonRaw : (wonRaw === 1n || wonRaw === 1);
-              const outcomeSide = outcomeNum === 0 ? "heads" : "tails";
-              
-              // OPTIMIZATION 11: Reduced animation time (2s -> 1.5s)
-              setAnimationResult(outcomeSide);
-              await new Promise(resolve => setTimeout(resolve, 1500));
-              
-              // Update UI
-              setLastResult({
-                guess: currentGuess,
-                outcome: outcomeSide,
-                won: won
-              });
-              
-              setShowAnimation(false);
-              
-              // OPTIMIZATION 12: Update stats in background (non-blocking)
-              loadUserStats(contract).catch(() => {});
-              
-              // OPTIMIZATION 13: Award points in background (non-blocking)
-              if (ownerAddress) {
-                awardFlipPoints(ownerAddress).then(pointsResult => {
-                  if (pointsResult.success && pointsResult.points !== undefined) {
-                    setUserPoints(pointsResult.points);
-                    toast({
-                      title: "🎉 Points Awarded!",
-                      description: `+${pointsResult.pointsAwarded} points! Total: ${pointsResult.points}`,
-                    });
-                  }
-                }).catch(() => {});
-              }
-              
-              // Show result
-              if (won) {
-                const payoutAmount = hasAmountFlip && payoutTotal 
-                  ? ethers.formatUnits(payoutTotal, usdcDecimals) 
-                  : expectedPayout;
-                toast({
-                  title: "🎉 You Won!",
-                  description: hasAmountFlip ? `Payout: ${payoutAmount} USDC` : `You correctly guessed ${outcomeSide}!`,
+              if (events.length > 0) {
+                const event = events[events.length - 1];
+                const parsed = contract.interface.parseLog(event);
+                const outcomeNum = Number(parsed.args[3]);
+                const wonRaw = parsed.args[4];
+                const payoutTotal = parsed.args[6];
+                
+                const won = typeof wonRaw === 'boolean' ? wonRaw : (wonRaw === 1n || wonRaw === 1);
+                const outcomeSide = outcomeNum === 0 ? "heads" : "tails";
+                
+                setAnimationResult(outcomeSide);
+                await new Promise(resolve => setTimeout(resolve, 1500));
+                
+                setLastResult({
+                  guess: currentGuess,
+                  outcome: outcomeSide,
+                  won: won
                 });
-              } else {
-                toast({
-                  variant: "destructive",
-                  title: "You Lost",
-                  description: `The outcome was ${outcomeSide}`,
-                });
+                
+                setShowAnimation(false);
+                loadUserStats(contract).catch(() => {});
+                
+                if (ownerAddress) {
+                  awardFlipPoints(ownerAddress).then(pointsResult => {
+                    if (pointsResult.success && pointsResult.points !== undefined) {
+                      setUserPoints(pointsResult.points);
+                    }
+                  }).catch(() => {});
+                }
+                
+                if (won) {
+                  const payoutAmount = hasAmountFlip && payoutTotal 
+                    ? ethers.formatUnits(payoutTotal, usdcDecimals) 
+                    : expectedPayout;
+                  toast({
+                    title: "🎉 You Won!",
+                    description: hasAmountFlip ? `Payout: ${payoutAmount} USDC` : `You correctly guessed ${outcomeSide}!`,
+                  });
+                } else {
+                  toast({
+                    variant: "destructive",
+                    title: "You Lost",
+                    description: `The outcome was ${outcomeSide}`,
+                  });
+                }
               }
-              
-              break;
+            }
+          } catch (pollError) {
+            console.error('Fallback polling error:', pollError);
+          }
+        }
+        
+        if (!resolved) {
+          throw new Error("Bet resolution timeout");
+        }
+        return; // Exit early if we used fallback
+      }
+      
+      // MAIN PATH: Use outcome from backend immediately (1-3 second UX)
+      if (resolveResult.outcome === undefined) {
+        throw new Error("Backend did not return outcome");
+      }
+      
+      // Map backend's outcome to heads/tails (0 = heads, 1 = tails)
+      const outcomeSide = resolveResult.outcome === 0 ? "heads" : "tails" as "heads" | "tails";
+      const won = (currentGuess === outcomeSide);
+      
+      // Show result immediately with animation
+      setAnimationResult(outcomeSide);
+      await new Promise(res => setTimeout(res, 1500)); // 1.5s animation
+      
+      setLastResult({
+        guess: currentGuess,
+        outcome: outcomeSide,
+        won,
+      });
+      
+      setShowAnimation(false);
+      
+      // Background tasks (non-blocking)
+      loadUserStats(contract).catch(() => {});
+      
+      if (ownerAddress) {
+        awardFlipPoints(ownerAddress).then(pointsResult => {
+          if (pointsResult.success && pointsResult.points !== undefined) {
+            setUserPoints(pointsResult.points);
+            toast({
+              title: "🎉 Points Awarded!",
+              description: `+${pointsResult.pointsAwarded} points! Total: ${pointsResult.points}`,
+            });
+          }
+        }).catch(() => {});
+      }
+      
+      // Show toasts
+      if (won) {
+        toast({
+          title: "🎉 You Won!",
+          description: hasAmountFlip
+            ? `Payout: ${expectedPayout} USDC`
+            : `You correctly guessed ${outcomeSide}!`,
+        });
+      } else {
+        toast({
+          variant: "destructive",
+          title: "You Lost",
+          description: `The outcome was ${outcomeSide}`,
+        });
+      }
+      
+      // Background sanity check (fire and forget - doesn't block UX)
+      (async () => {
+        try {
+          const MAX_BACKGROUND_WAIT = 60000;
+          const start = Date.now();
+          let resolved = false;
+          
+          while (!resolved && (Date.now() - start) < MAX_BACKGROUND_WAIT) {
+            await new Promise(r => setTimeout(r, 2000));
+            const betInfo = await contract.bets(betId);
+            if (Number(betInfo.status) === 2) {
+              resolved = true;
+              console.log("✅ Background check: Bet confirmed on-chain");
             }
           }
-        } catch (pollError) {
-          console.error('Polling error:', pollError);
+          
+          if (!resolved) {
+            console.warn("⚠️ Background check: Bet not confirmed within timeout");
+          }
+        } catch (e) {
+          console.warn("Background bet status check failed", e);
         }
-      }
-      
-      if (!resolved) {
-        throw new Error("Bet resolution timeout");
-      }
+      })();
       
     } catch (error: any) {
       
