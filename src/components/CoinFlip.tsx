@@ -552,11 +552,12 @@ export const CoinFlip = ({ connectedWallet, connectedWalletName, walletProviders
       });
       
       // Immediately resolve the bet via backend API (Heroku - fast resolution!)
+      // OPTIMIZED: Send clientSeed directly to avoid backend event query (saves 1-2s)
       try {
         // Reduced wait - Heroku is fast, only need minimal time for bet to be indexed
         await new Promise(resolve => setTimeout(resolve, 500));
         
-        const resolveResult = await resolveBetImmediately(betId);
+        const resolveResult = await resolveBetImmediately(betId, userSeed);
         
         // If bet was already resolved, that's okay - just proceed to check result
         if (resolveResult.success || (resolveResult as any).alreadyResolved) {
