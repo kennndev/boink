@@ -553,23 +553,27 @@ export const CoinFlip = ({ connectedWallet, connectedWalletName, walletProviders
       
       // Immediately resolve the bet via backend API (Heroku - fast resolution!)
       // OPTIMIZED: Send clientSeed directly to avoid backend event query (saves 1-2s)
+      let backendResolved = false;
+      let backendTxHash: string | undefined = undefined;
+      
       try {
-        // Reduced wait - Heroku is fast, only need minimal time for bet to be indexed
-        await new Promise(resolve => setTimeout(resolve, 500));
+        // OPTIMIZED: Reduced wait - bet is already confirmed, minimal indexing delay needed
+        await new Promise(resolve => setTimeout(resolve, 200));
         
         const resolveResult = await resolveBetImmediately(betId, userSeed);
         
         // If bet was already resolved, that's okay - just proceed to check result
         if (resolveResult.success || (resolveResult as any).alreadyResolved) {
+          backendResolved = true;
+          backendTxHash = resolveResult.transactionHash;
+          
           toast({
             title: "Bet Resolving...",
-            description: resolveResult.success ? "Transaction confirming..." : "Bet already resolved, checking result...",
+            description: resolveResult.success ? "Transaction sent, confirming..." : "Bet already resolved, checking result...",
           });
           
-          // Reduced wait - Heroku resolves fast, transaction confirms quickly
-          if (resolveResult.success) {
-            await new Promise(resolve => setTimeout(resolve, 1500));
-          }
+          // OPTIMIZED: Don't wait - start polling immediately (transaction might confirm faster)
+          // The polling loop will catch it as soon as it's confirmed
         } else {
           // If resolution failed and it's not "already resolved", throw error
           if (!(resolveResult as any).alreadyResolved) {
@@ -597,11 +601,14 @@ export const CoinFlip = ({ connectedWallet, connectedWalletName, walletProviders
       }
       
       // Wait for BetResolved event (either from immediate resolution or fallback)
-      // Poll for up to 60 seconds (oracle should resolve within a few blocks)
+      // OPTIMIZED: Faster polling for quicker detection
       const MAX_WAIT_TIME = 60000; // 60 seconds
-      const POLL_INTERVAL = 1000; // Check every 1 second (faster polling with Heroku)
+      const POLL_INTERVAL = 500; // OPTIMIZED: Check every 500ms (was 1s) for faster detection
       const startTime = Date.now();
       let resolved = false;
+      
+      // OPTIMIZED: If backend already sent transaction, we can start polling immediately
+      // No need to wait - transaction might confirm in 2-3 seconds instead of waiting 1.5s
       
       while (!resolved && (Date.now() - startTime) < MAX_WAIT_TIME) {
         await new Promise(resolve => setTimeout(resolve, POLL_INTERVAL));
@@ -692,8 +699,8 @@ export const CoinFlip = ({ connectedWallet, connectedWalletName, walletProviders
               // Set animation result and wait for animation to complete
               setAnimationResult(outcomeSide);
               
-              // Wait for animation to finish (reduced from 3.5s to 2.5s for faster UX)
-              await new Promise(resolve => setTimeout(resolve, 2500));
+              // OPTIMIZED: Reduced animation time for faster UX (was 2.5s, now 2s)
+              await new Promise(resolve => setTimeout(resolve, 2000));
               
               // Use the captured guess to ensure accuracy
               setLastResult({
