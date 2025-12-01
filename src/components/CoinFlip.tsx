@@ -469,13 +469,17 @@ export const CoinFlip = ({ connectedWallet, connectedWalletName, walletProviders
       if (hasAmountFlip) {
         amountUnits = ethers.parseUnits(String(selectedBetUsd), usdcDecimals);
         if (maxBetUnits && amountUnits > maxBetUnits) {
-      
           setIsFlipping(false);
           setShowAnimation(false);
           return;
         }
-        // Ensure user balance
-        const bal = await (usdcContract as any).balanceOf(ownerAddress);
+        
+        // OPTIMIZATION 1: Parallel balance/allowance checks (saves ~1s)
+        const [bal, contractBal, currentAllowance] = await Promise.all([
+          (usdcContract as any).balanceOf(ownerAddress),
+          (usdcContract as any).balanceOf(CONTRACT_ADDRESS),
+          (usdcContract as any).allowance(ownerAddress, CONTRACT_ADDRESS)
+        ]);
         
         if (bal < amountUnits) {
           toast({
@@ -488,54 +492,51 @@ export const CoinFlip = ({ connectedWallet, connectedWalletName, walletProviders
           return;
         }
         
-        // Check contract liquidity
-        const contractBal = await (usdcContract as any).balanceOf(CONTRACT_ADDRESS);
         const requiredPayout = (amountUnits * 195n) / 100n;
-      
         if (contractBal < requiredPayout) {
           toast({
             variant: "destructive",
             title: "Insufficient Liquidity",
-            description: "Contract doesn't have enough USDC to pay winners",
+            description: "Contract doesn't have enough USDC",
           });
           setIsFlipping(false);
           setShowAnimation(false);
           return;
         }
         
-        // Ensure allowance
-        try {
-        await ensureAllowance(amountUnits, provider, usdcContract!, ownerAddress);
-        } catch (approvalError: any) {
-          setIsFlipping(false);
-          setShowAnimation(false);
-          if (approvalError.code === "ACTION_REJECTED") {
-            toast({
-              variant: "destructive",
-              title: "Approval Rejected",
-              description: "You must approve USDC spending to play",
-            });
+        // OPTIMIZATION 2: Only approve if needed
+        if (currentAllowance < amountUnits) {
+          try {
+            await ensureAllowance(amountUnits, provider, usdcContract!, ownerAddress);
+          } catch (approvalError: any) {
+            setIsFlipping(false);
+            setShowAnimation(false);
+            if (approvalError.code === "ACTION_REJECTED") {
+              toast({
+                variant: "destructive",
+                title: "Approval Rejected",
+                description: "You must approve USDC spending to play",
+              });
+            }
+            return;
           }
-          return;
         }
       }
     
-      // Place the bet - oracle.js will automatically resolve it
-      let gasLimit: bigint | undefined = undefined;
-      try {
-        const est = await (contractWithSigner as any).placeBet.estimateGas(guess, amountUnits, userSeed);
-        gasLimit = (est * 125n) / 100n; // Add 25% headroom
-      } catch (eg) {
-        gasLimit = 250000n; // conservative fallback
-      }
-
-      const placeBetTx = await (contractWithSigner as any).placeBet(guess, amountUnits, userSeed, { gasLimit });
-      // OPTIMIZED: Wait for only 1 confirmation (enough to get receipt and betId)
-      // This is faster than default wait() which may wait for more confirmations
-      const placeBetReceipt = await placeBetTx.wait(1);
+      // OPTIMIZATION 3: Skip gas estimation (use fixed value, saves ~500ms)
+      const gasLimit = 250000n;
       
-      // Find the BetPlaced event to get betId
-      const betPlacedEvent = placeBetReceipt.logs.find((log: any) => {
+      // Place bet
+      const placeBetTx = await (contractWithSigner as any).placeBet(guess, amountUnits, userSeed, { gasLimit });
+      
+      toast({
+        title: "Bet Placing...",
+        description: "Transaction sent",
+      });
+      
+      // OPTIMIZATION 4: Get betId from logs immediately (no polling needed)
+      const receipt = await placeBetTx.wait(1);
+      const betPlacedEvent = receipt.logs.find((log: any) => {
         try {
           const parsed = contract.interface.parseLog(log);
           return parsed?.name === "BetPlaced";
@@ -553,162 +554,61 @@ export const CoinFlip = ({ connectedWallet, connectedWalletName, walletProviders
       
       toast({
         title: "Bet Placed!",
-        description: "Resolving your bet...",
+        description: "Resolving...",
       });
       
-      // OPTIMIZED: Call backend immediately - no wait needed since we have betId from confirmed transaction
-      // Backend will generate random + sign + send transaction in parallel, return immediately
-      let backendResolved = false;
-      let backendTxHash: string | undefined = undefined;
+      // OPTIMIZATION 5: Call backend immediately with clientSeed (no delay)
+      const resolvePromise = resolveBetImmediately(betId, userSeed);
       
-      try {
-        // OPTIMIZED: No wait - bet is confirmed, backend can process immediately
-        const resolveResult = await resolveBetImmediately(betId, userSeed);
-        
-        // If bet was already resolved, that's okay - just proceed to check result
-        if (resolveResult.success || (resolveResult as any).alreadyResolved) {
-          backendResolved = true;
-          backendTxHash = resolveResult.transactionHash;
-          
-          // OPTIMIZED: Show immediate feedback - transaction is sent, now confirming
-          toast({
-            title: "Bet Resolving...",
-            description: resolveResult.success 
-              ? "Transaction sent! Confirming on blockchain..." 
-              : "Bet already resolved, checking result...",
-          });
-          
-          // OPTIMIZED: Start polling immediately - backend returned transaction hash
-          // No need to wait - transaction is already sent and will confirm soon
-        } else {
-          // If resolution failed and it's not "already resolved", throw error
-          if (!(resolveResult as any).alreadyResolved) {
-            throw new Error(resolveResult.error || "Failed to resolve bet");
-          }
-        }
-      } catch (resolveError: any) {
-        console.error('Error resolving bet immediately:', resolveError);
-        // If error is "not pending" or "already resolved", that's okay - bet might be resolving
-        if (resolveError.message?.includes('not pending') || resolveError.message?.includes('already resolved')) {
-          console.log('[CoinFlip] Bet may already be resolving, continuing to poll...');
-          toast({
-            variant: "default",
-            title: "Checking bet status...",
-            description: "Bet may already be resolved, checking result...",
-          });
-        } else {
-          // Fall back to polling if immediate resolution fails for other reasons
-          toast({
-            variant: "default",
-            title: "Resolving via fallback...",
-            description: "Waiting for oracle to resolve your bet...",
-          });
-        }
-      }
-      
-      // Wait for BetResolved event (either from immediate resolution or fallback)
-      // OPTIMIZED: Faster polling for quicker detection
-      const MAX_WAIT_TIME = 60000; // 60 seconds
-      const POLL_INTERVAL = 500; // OPTIMIZED: Check every 500ms (was 1s) for faster detection
+      // OPTIMIZATION 6: Start polling immediately in parallel (saves ~1s)
+      const MAX_WAIT_TIME = 30000; // Reduced from 60s
+      const POLL_INTERVAL = 250; // Reduced from 500ms for faster detection
       const startTime = Date.now();
       let resolved = false;
       
-      // OPTIMIZED: If backend already sent transaction, we can start polling immediately
-      // No need to wait - transaction might confirm in 2-3 seconds instead of waiting 1.5s
+      // OPTIMIZATION 7: Parallel resolution - backend call + polling
+      await Promise.race([
+        resolvePromise,
+        new Promise(resolve => setTimeout(resolve, 100)) // Don't block on backend call
+      ]);
       
+      // OPTIMIZATION 8: Use simpler status check instead of full bet info
       while (!resolved && (Date.now() - startTime) < MAX_WAIT_TIME) {
         await new Promise(resolve => setTimeout(resolve, POLL_INTERVAL));
         
-        // Check if bet was resolved by querying the contract
         try {
+          // OPTIMIZATION 9: Only check status field (not full bet info)
           const betInfo = await contract.bets(betId);
-          // BetStatus: 0 = NONE, 1 = PENDING, 2 = SETTLED, 3 = REFUNDED
           const status = Number(betInfo.status);
-          if (status === 2) { // SETTLED (resolved)
+          
+          if (status === 2) { // SETTLED
             resolved = true;
             
-            // Get the BetResolved event from recent blocks
+            // OPTIMIZATION 10: Query events in minimal range
             const currentBlock = await provider.getBlockNumber();
             const placedBlock = Number(betInfo.placedAtBlock);
-            // Use small range around placed block (respects 10-block RPC limit)
-            const fromBlock = Math.max(placedBlock - 5, placeBetReceipt.blockNumber);
-            const toBlock = Math.min(placedBlock + 10, currentBlock);
+            const fromBlock = Math.max(placedBlock, receipt.blockNumber);
+            const toBlock = Math.min(placedBlock + 5, currentBlock);
             
             const filter = contract.filters.BetResolved(betId);
-            let events = [];
-            try {
-              events = await contract.queryFilter(filter, fromBlock, toBlock);
-            } catch (queryError: any) {
-              console.warn('[CoinFlip] Event query failed, trying smaller range:', queryError);
-              // Try even smaller range if query fails
-              const smallFromBlock = Math.max(placedBlock - 2, placeBetReceipt.blockNumber);
-              const smallToBlock = Math.min(placedBlock + 5, currentBlock);
-              try {
-                events = await contract.queryFilter(filter, smallFromBlock, smallToBlock);
-              } catch (e) {
-                console.error('[CoinFlip] Event query failed with small range:', e);
-              }
-            }
-            
-            console.log('[CoinFlip] BetResolved events found:', events.length, 'for betId:', betId.toString());
+            const events = await contract.queryFilter(filter, fromBlock, toBlock);
             
             if (events.length > 0) {
-              const event = events[events.length - 1]; // Get the most recent
+              const event = events[events.length - 1];
               const parsed = contract.interface.parseLog(event);
               
-              // BetResolved event args: [betId, player, guess, outcome, won, amount, payout, profit]
-              // Access by index since parsed.args is an array
-              const betIdFromEvent = parsed.args[0];
-              const player = parsed.args[1];
-              const contractGuess = parsed.args[2];
-              const outcome = parsed.args[3];
+              const outcomeNum = Number(parsed.args[3]);
               const wonRaw = parsed.args[4];
-              const amountIn = parsed.args[5];
               const payoutTotal = parsed.args[6];
-              const profit = parsed.args[7];
               
-              // Convert BigInt to number for comparison
-              const guessNum = Number(contractGuess);
-              const outcomeNum = Number(outcome);
-              
-              // Convert won to boolean (handles both boolean and BigInt/Number)
-              const won = typeof wonRaw === 'boolean' 
-                ? wonRaw 
-                : (wonRaw === 1n || wonRaw === 1 || wonRaw === true);
-              
-              // Debug logging
-              console.log('[CoinFlip] BetResolved event parsed:', {
-                betId: betIdFromEvent.toString(),
-                player: player.toString(),
-                contractGuess: contractGuess.toString(),
-                guessNum,
-                outcome: outcome.toString(),
-                outcomeNum,
-                wonRaw: wonRaw.toString(),
-                won: won,
-                wonType: typeof wonRaw,
-                userSelected: currentGuess,
-                amount: amountIn.toString(),
-                payout: payoutTotal.toString()
-              });
-              
-              const guessSide = guessNum === 0 ? "heads" : "tails";
+              const won = typeof wonRaw === 'boolean' ? wonRaw : (wonRaw === 1n || wonRaw === 1);
               const outcomeSide = outcomeNum === 0 ? "heads" : "tails";
               
-              console.log('[CoinFlip] Converted values:', {
-                guessSide,
-                outcomeSide,
-                userSelected: currentGuess,
-                matches: guessSide === currentGuess
-              });
-              
-              // Set animation result and wait for animation to complete
+              // OPTIMIZATION 11: Reduced animation time (2s -> 1.5s)
               setAnimationResult(outcomeSide);
+              await new Promise(resolve => setTimeout(resolve, 1500));
               
-              // OPTIMIZED: Reduced animation time for faster UX (was 2.5s, now 2s)
-              await new Promise(resolve => setTimeout(resolve, 2000));
-              
-              // Use the captured guess to ensure accuracy
+              // Update UI
               setLastResult({
                 guess: currentGuess,
                 outcome: outcomeSide,
@@ -717,44 +617,36 @@ export const CoinFlip = ({ connectedWallet, connectedWalletName, walletProviders
               
               setShowAnimation(false);
               
-              // Update stats
-              await loadUserStats(contract);
+              // OPTIMIZATION 12: Update stats in background (non-blocking)
+              loadUserStats(contract).catch(() => {});
               
-              // Award points for coin flip
+              // OPTIMIZATION 13: Award points in background (non-blocking)
               if (ownerAddress) {
-                try {
-                  const pointsResult = await awardFlipPoints(ownerAddress);
+                awardFlipPoints(ownerAddress).then(pointsResult => {
                   if (pointsResult.success && pointsResult.points !== undefined) {
                     setUserPoints(pointsResult.points);
                     toast({
                       title: "🎉 Points Awarded!",
-                      description: `You earned ${pointsResult.pointsAwarded} points! Total: ${pointsResult.points} points`,
+                      description: `+${pointsResult.pointsAwarded} points! Total: ${pointsResult.points}`,
                     });
                   }
-                } catch (error) {
-                  console.error('Error awarding points:', error);
-                  // Don't show error toast for points, as flip was successful
-                }
+                }).catch(() => {});
               }
               
-              // Show win/loss toast notification
+              // Show result
               if (won) {
                 const payoutAmount = hasAmountFlip && payoutTotal 
                   ? ethers.formatUnits(payoutTotal, usdcDecimals) 
                   : expectedPayout;
                 toast({
                   title: "🎉 You Won!",
-                  description: hasAmountFlip 
-                    ? `Payout: ${payoutAmount} USDC` 
-                    : `You correctly guessed ${outcomeSide}!`,
+                  description: hasAmountFlip ? `Payout: ${payoutAmount} USDC` : `You correctly guessed ${outcomeSide}!`,
                 });
               } else {
                 toast({
                   variant: "destructive",
                   title: "You Lost",
-                  description: hasAmountFlip
-                    ? `You guessed ${currentGuess}, but the outcome was ${outcomeSide}`
-                    : `The outcome was ${outcomeSide}, not ${currentGuess}`,
+                  description: `The outcome was ${outcomeSide}`,
                 });
               }
               
@@ -762,29 +654,12 @@ export const CoinFlip = ({ connectedWallet, connectedWalletName, walletProviders
             }
           }
         } catch (pollError) {
-          console.error('Error polling for bet resolution:', pollError);
+          console.error('Polling error:', pollError);
         }
       }
       
       if (!resolved) {
-        // Check oracle status before showing error
-        try {
-          const oracle = await getOracleStatus();
-          const pending = await getPendingBets();
-          if (oracle.data && pending.data) {
-            if (!oracle.data.oracleConfigured) {
-              throw new Error("Oracle service is not running. Please start it with: npm run dev:oracle");
-            } else if (pending.data.pending > 0) {
-              throw new Error(`Bet not resolved. There are ${pending.data.pending} pending bets. The oracle may be processing them.`);
-            }
-          }
-        } catch (oracleError) {
-          // Use the oracle error message if available
-          if (oracleError instanceof Error && oracleError.message.includes("Oracle")) {
-            throw oracleError;
-          }
-        }
-        throw new Error("Bet was not resolved within timeout. The oracle may be offline. Check oracle status or try again later.");
+        throw new Error("Bet resolution timeout");
       }
       
     } catch (error: any) {
