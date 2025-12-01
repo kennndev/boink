@@ -675,8 +675,9 @@ export async function getOracleStatus(): Promise<{ success: boolean; data?: Orac
  * This is called right after user places bet, eliminating need for polling
  * Uses Heroku-deployed bet resolver for fast resolution (no cold starts)
  * OPTIMIZED: Frontend sends clientSeed directly to avoid backend event query
+ * Returns outcome immediately (0 = heads, 1 = tails) for instant UX
  */
-export async function resolveBetImmediately(betId: number | bigint | string, clientSeed?: number | bigint | string): Promise<{ success: boolean; transactionHash?: string; error?: string; alreadyResolved?: boolean; pending?: boolean }> {
+export async function resolveBetImmediately(betId: number | bigint | string, clientSeed?: number | bigint | string): Promise<{ success: boolean; transactionHash?: string; outcome?: number; error?: string; alreadyResolved?: boolean; pending?: boolean }> {
   try {
     // Use Heroku bet resolver service for fast resolution
     const response = await fetch(`${BET_RESOLVER_URL}/oracle/resolve-bet`, {
@@ -697,6 +698,7 @@ export async function resolveBetImmediately(betId: number | bigint | string, cli
       return {
         success: true,
         transactionHash: data.transactionHash,
+        outcome: data.outcome !== undefined ? Number(data.outcome) : undefined, // 0 = heads, 1 = tails
         alreadyResolved: data.alreadyResolved || false,
         pending: data.pending || false // Transaction sent but not yet confirmed
       };
