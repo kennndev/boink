@@ -335,7 +335,8 @@ export const CoinFlip = ({ connectedWallet, connectedWalletName, walletProviders
       
       const tx = await (erc20.connect(signer) as any).approve(CONTRACT_ADDRESS, approvalAmount);
 
-      const receipt = await tx.wait();
+      // OPTIMIZED: Wait for only 1 confirmation (fast enough, saves time)
+      const receipt = await tx.wait(1);
       
       // Wait for blockchain state to update by polling allowance
       toast({
@@ -366,11 +367,13 @@ export const CoinFlip = ({ connectedWallet, connectedWalletName, walletProviders
       // Some ERC20s (incl. USDC) require setting allowance to 0 before updating
       try {
         const tx0 = await (erc20.connect(signer) as any).approve(CONTRACT_ADDRESS, 0);
-        await tx0.wait();
+        // OPTIMIZED: Wait for only 1 confirmation
+        await tx0.wait(1);
         
         const approvalAmount = ethers.parseUnits("1000", usdcDecimals);
         const tx1 = await (erc20.connect(signer) as any).approve(CONTRACT_ADDRESS, approvalAmount);
-        await tx1.wait();
+        // OPTIMIZED: Wait for only 1 confirmation
+        await tx1.wait(1);
         
         // Wait and verify
         await new Promise(resolve => setTimeout(resolve, 2000));
@@ -527,7 +530,9 @@ export const CoinFlip = ({ connectedWallet, connectedWalletName, walletProviders
       }
 
       const placeBetTx = await (contractWithSigner as any).placeBet(guess, amountUnits, userSeed, { gasLimit });
-      const placeBetReceipt = await placeBetTx.wait();
+      // OPTIMIZED: Wait for only 1 confirmation (enough to get receipt and betId)
+      // This is faster than default wait() which may wait for more confirmations
+      const placeBetReceipt = await placeBetTx.wait(1);
       
       // Find the BetPlaced event to get betId
       const betPlacedEvent = placeBetReceipt.logs.find((log: any) => {
@@ -551,15 +556,13 @@ export const CoinFlip = ({ connectedWallet, connectedWalletName, walletProviders
         description: "Resolving your bet...",
       });
       
-      // Immediately resolve the bet via backend API (Heroku - fast resolution!)
-      // OPTIMIZED: Send clientSeed directly to avoid backend event query (saves 1-2s)
+      // OPTIMIZED: Call backend immediately - no wait needed since we have betId from confirmed transaction
+      // Backend will generate random + sign + send transaction in parallel, return immediately
       let backendResolved = false;
       let backendTxHash: string | undefined = undefined;
       
       try {
-        // OPTIMIZED: Reduced wait - bet is already confirmed, minimal indexing delay needed
-        await new Promise(resolve => setTimeout(resolve, 200));
-        
+        // OPTIMIZED: No wait - bet is confirmed, backend can process immediately
         const resolveResult = await resolveBetImmediately(betId, userSeed);
         
         // If bet was already resolved, that's okay - just proceed to check result
@@ -567,13 +570,16 @@ export const CoinFlip = ({ connectedWallet, connectedWalletName, walletProviders
           backendResolved = true;
           backendTxHash = resolveResult.transactionHash;
           
+          // OPTIMIZED: Show immediate feedback - transaction is sent, now confirming
           toast({
             title: "Bet Resolving...",
-            description: resolveResult.success ? "Transaction sent, confirming..." : "Bet already resolved, checking result...",
+            description: resolveResult.success 
+              ? "Transaction sent! Confirming on blockchain..." 
+              : "Bet already resolved, checking result...",
           });
           
-          // OPTIMIZED: Don't wait - start polling immediately (transaction might confirm faster)
-          // The polling loop will catch it as soon as it's confirmed
+          // OPTIMIZED: Start polling immediately - backend returned transaction hash
+          // No need to wait - transaction is already sent and will confirm soon
         } else {
           // If resolution failed and it's not "already resolved", throw error
           if (!(resolveResult as any).alreadyResolved) {
