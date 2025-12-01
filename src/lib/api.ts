@@ -676,7 +676,7 @@ export async function getOracleStatus(): Promise<{ success: boolean; data?: Orac
  * Uses Heroku-deployed bet resolver for fast resolution (no cold starts)
  * OPTIMIZED: Frontend sends clientSeed directly to avoid backend event query
  */
-export async function resolveBetImmediately(betId: number | bigint | string, clientSeed?: number | bigint | string): Promise<{ success: boolean; transactionHash?: string; error?: string; alreadyResolved?: boolean }> {
+export async function resolveBetImmediately(betId: number | bigint | string, clientSeed?: number | bigint | string): Promise<{ success: boolean; transactionHash?: string; error?: string; alreadyResolved?: boolean; pending?: boolean }> {
   try {
     // Use Heroku bet resolver service for fast resolution
     const response = await fetch(`${BET_RESOLVER_URL}/oracle/resolve-bet`, {
@@ -692,12 +692,13 @@ export async function resolveBetImmediately(betId: number | bigint | string, cli
     
     const data = await response.json();
     
-    // Handle 200 success (including already resolved)
+    // Handle 200 success (including already resolved or pending)
     if (response.ok && data.success) {
       return {
         success: true,
         transactionHash: data.transactionHash,
-        alreadyResolved: data.alreadyResolved || false
+        alreadyResolved: data.alreadyResolved || false,
+        pending: data.pending || false // Transaction sent but not yet confirmed
       };
     }
     
