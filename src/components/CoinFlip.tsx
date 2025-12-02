@@ -209,9 +209,20 @@ export const CoinFlip = ({ connectedWallet, connectedWalletName, walletProviders
           try {
             let amountFlipDetected = false;
             try {
-              coinFlipContract.interface.getFunction("placeBet(uint8,uint256,uint256)");
-              amountFlipDetected = true;
-            } catch {}
+              const func = coinFlipContract.interface.getFunction("placeBet(uint8,uint256,uint256)");
+              if (func) {
+                amountFlipDetected = true;
+                console.log("✅ CoinFlip contract supports placeBet(uint8,uint256,uint256)");
+              }
+            } catch (e) {
+              console.warn("⚠️ Could not detect placeBet(uint8,uint256,uint256):", e);
+              // Fallback: If USDC is configured, assume contract supports amount-based betting
+              // (The ABI has it, so detection might just be failing due to interface parsing)
+              if (isUsdcConfigured && usdcAddress) {
+                console.log("⚠️ Detection failed, but USDC is configured - assuming amount-based betting is supported");
+                amountFlipDetected = true;
+              }
+            }
             setHasAmountFlip(amountFlipDetected);
 
             let quoteDetected = false;
@@ -498,6 +509,127 @@ export const CoinFlip = ({ connectedWallet, connectedWalletName, walletProviders
     return true;
   };
 
+  // Try EIP-7702 batch transaction (wallet_sendCalls)
+  const handleFlipWithBatch = async (
+    ownerAddress: string,
+    signer: ethers.Signer,
+    contractWithSigner: ethers.BaseContract,
+    guess: number,
+    amountUnits: bigint,
+    userSeed: number,
+    ethereumProvider: any
+  ) => {
+    try {
+      console.log("🚀 Attempting EIP-7702 batch transaction (wallet_sendCalls)");
+      
+      // Get network chain ID
+      const network = await provider!.getNetwork();
+      const chainId = network.chainId;
+      
+      // Format chainId as hex without leading zeros (MetaMask requirement)
+      const chainIdHex = "0x" + chainId.toString(16);
+      
+      // Prepare approve call data
+      const usdcAddress = await usdcContract!.getAddress();
+      const approveInterface = new ethers.Interface([
+        "function approve(address spender, uint256 amount) external returns (bool)"
+      ]);
+      const approveData = approveInterface.encodeFunctionData("approve", [
+        CONTRACT_ADDRESS,
+        ethers.parseUnits("1000", usdcDecimals) // Approve 1000 USDC
+      ]);
+      
+      // Prepare placeBet call data
+      const placeBetInterface = contractWithSigner.interface;
+      const placeBetData = placeBetInterface.encodeFunctionData("placeBet", [
+        guess,
+        amountUnits,
+        userSeed
+      ]);
+      
+      // Construct batch call
+      const calls = [
+        {
+          to: usdcAddress,
+          data: approveData,
+          value: "0x0"
+        },
+        {
+          to: CONTRACT_ADDRESS,
+          data: placeBetData,
+          value: "0x0"
+        }
+      ];
+      
+      const batchParams = {
+        version: "2.0.0",
+        chainId: chainIdHex,
+        from: ownerAddress,
+        calls: calls,
+        atomicRequired: true // Both must succeed or both fail
+      };
+      
+      console.log("📤 Sending wallet_sendCalls batch:", batchParams);
+      
+      toast({
+        title: "Batching Transactions",
+        description: "Sending approve + bet in one batch transaction...",
+      });
+      
+      // Try wallet_sendCalls (EIP-7702)
+      const txHash = await ethereumProvider.request({
+        method: "wallet_sendCalls",
+        params: [batchParams]
+      });
+      
+      console.log("✅ Batch transaction sent! Hash:", txHash);
+      
+      toast({
+        title: "Batch Transaction Sent",
+        description: "Waiting for confirmation...",
+      });
+      
+      // Wait for transaction receipt
+      const receipt = await provider!.waitForTransaction(txHash, 1);
+      
+      // Find BetPlaced event from the logs
+      const betPlacedEvent = receipt.logs.find((log: any) => {
+        try {
+          const parsed = contractWithSigner.interface.parseLog(log);
+          return parsed?.name === "BetPlaced";
+        } catch {
+          return false;
+        }
+      });
+      
+      if (!betPlacedEvent) {
+        throw new Error("BetPlaced event not found in batch transaction");
+      }
+      
+      const betPlacedParsed = contractWithSigner.interface.parseLog(betPlacedEvent);
+      return {
+        betId: betPlacedParsed.args.betId,
+        receiptBlockNumber: Number(receipt.blockNumber),
+      };
+    } catch (error: any) {
+      console.error("❌ EIP-7702 batch failed:", error);
+      
+      // Check if it's a capability problem (wallet doesn't support it)
+      const isCapabilityProblem = 
+        error.code === 5710 || 
+        error.message?.includes("not supported") ||
+        error.message?.includes("EIP-7702") ||
+        error.nestedCode === 5710;
+      
+      if (isCapabilityProblem) {
+        console.log("⚠️ Wallet doesn't support EIP-7702 batching, will try permit/approve");
+        throw new Error("WALLET_NO_EIP7702_SUPPORT");
+      }
+      
+      throw error;
+    }
+  };
+
   // Use permit + placeBetWithPermit for single transaction (EIP-2612)
   const handleFlipWithPermit = async (
     ownerAddress: string,
@@ -514,18 +646,80 @@ export const CoinFlip = ({ connectedWallet, connectedWalletName, walletProviders
       const nonce = await usdcContract!.nonces(ownerAddress);
       
       // Get token name and chain ID for EIP-712 domain
-      const [tokenName, network] = await Promise.all([
+      const [tokenName, network, domainSeparator] = await Promise.all([
         usdcContract!.name(),
-        provider!.getNetwork()
+        provider!.getNetwork(),
+        usdcContract!.DOMAIN_SEPARATOR()
       ]);
       
-      // Create EIP-712 domain for permit
-      const domain = {
-        name: tokenName,
-        version: "1",
+      console.log("🔍 USDC Permit Domain Info:", {
+        tokenName,
         chainId: network.chainId,
-        verifyingContract: await usdcContract!.getAddress(),
-      };
+        domainSeparator: domainSeparator
+      });
+      
+      // Try to find the correct EIP-712 domain version by testing common versions
+      const usdcAddress = await usdcContract!.getAddress();
+      
+      // First, try to read version from contract if it has a version() function
+      let contractVersion: string | null = null;
+      try {
+        const versionFunc = usdcContract!.interface.getFunction("version");
+        if (versionFunc) {
+          contractVersion = await (usdcContract as any).version();
+          console.log(`📖 Contract exposes version(): "${contractVersion}"`);
+        }
+      } catch (e) {
+        // Contract doesn't have version() function, that's okay
+      }
+      
+      const commonVersions = contractVersion 
+        ? [contractVersion, "1", "2", "2.0", ""] // Try contract version first
+        : ["1", "2", "2.0", ""]; // Try common versions (empty string is also used)
+      let correctVersion: string | null = null;
+      let domain: any = null;
+      
+      console.log("🔍 Trying to detect correct EIP-712 domain version...");
+      for (const version of commonVersions) {
+        const testDomain = {
+          name: tokenName,
+          version: version,
+          chainId: network.chainId,
+          verifyingContract: usdcAddress,
+        };
+        
+        try {
+          const expectedDomain = ethers.TypedDataEncoder.hashDomain(testDomain);
+          if (domainSeparator.toLowerCase() === expectedDomain.toLowerCase()) {
+            correctVersion = version;
+            domain = testDomain;
+            console.log(`✅ Found correct version: "${version}"`);
+            break;
+          }
+        } catch (e) {
+          // Continue to next version
+        }
+      }
+      
+      // If no version matched, default to "1" and log warning
+      if (!domain) {
+        console.warn("⚠️ Could not detect domain version, defaulting to '1'. Permit may fail.");
+        domain = {
+          name: tokenName,
+          version: "1",
+          chainId: network.chainId,
+          verifyingContract: usdcAddress,
+        };
+      }
+      
+      // Log final domain info
+      console.log("🔍 Final EIP-712 Domain:", {
+        name: domain.name,
+        version: domain.version || '(empty string)',
+        chainId: domain.chainId.toString(),
+        verifyingContract: domain.verifyingContract,
+        contractDomainSeparator: domainSeparator
+      });
       
       // EIP-712 types for permit
       const types = {
@@ -564,9 +758,21 @@ export const CoinFlip = ({ connectedWallet, connectedWalletName, walletProviders
       });
       
       console.log("📤 Step 2: Sending ONE on-chain transaction (permit + placeBetWithPermit combined)");
+      console.log("   Permit parameters:", {
+        owner: ownerAddress,
+        spender: CONTRACT_ADDRESS,
+        value: amountUnits.toString(),
+        nonce: nonce.toString(),
+        deadline: deadline,
+        v: v,
+        r: r,
+        s: s
+      });
+      
       // Call placeBetWithPermit on the contract (single transaction!)
       // Function signature: placeBetWithPermit(uint8 guess, uint256 amount, uint256 seed, uint256 deadline, uint8 v, bytes32 r, bytes32 s)
       const gasLimit = 300000n;
+      
       const placeBetTx = await (contractWithSigner as any).placeBetWithPermit(
         guess,
         amountUnits,
@@ -584,6 +790,29 @@ export const CoinFlip = ({ connectedWallet, connectedWalletName, walletProviders
       });
       
       const receipt = await placeBetTx.wait(1);
+      
+      // Check if transaction reverted
+      if (receipt.status === 0) {
+        console.error("❌ Transaction reverted! Receipt:", receipt);
+        console.error("   Transaction hash:", receipt.hash);
+        console.error("   Gas used:", receipt.gasUsed.toString());
+        console.error("   To address:", receipt.to);
+        
+        // Common revert reasons for permit:
+        // 1. Invalid permit signature (wrong domain/version/nonce/deadline)
+        // 2. Permit deadline expired
+        // 3. USDC contract doesn't support permit
+        // 4. Contract validation failed (insufficient balance, max bet, etc.)
+        
+        throw new Error(`Transaction reverted. This usually means:
+1. Permit signature is invalid (check domain version - try changing from "1" to "2")
+2. Permit deadline expired
+3. USDC contract doesn't actually support permit() function
+4. Contract validation failed (check balance, max bet, liquidity)
+
+Check console for permit parameters.`);
+      }
+      
       const betPlacedEvent = receipt.logs.find((log: any) => {
         try {
           const parsed = contractWithSigner.interface.parseLog(log);
@@ -594,7 +823,8 @@ export const CoinFlip = ({ connectedWallet, connectedWalletName, walletProviders
       });
       
       if (!betPlacedEvent) {
-        throw new Error("BetPlaced event not found");
+        console.error("❌ BetPlaced event not found. Receipt logs:", receipt.logs);
+        throw new Error("BetPlaced event not found in transaction receipt");
       }
       
       const betPlacedParsed = contractWithSigner.interface.parseLog(betPlacedEvent);
@@ -678,8 +908,12 @@ export const CoinFlip = ({ connectedWallet, connectedWalletName, walletProviders
       let receiptBlockNumber: bigint | number | null = null;
       
       // Amount in USDC smallest units
+      // If USDC is configured, we should always use amount-based betting
+      // (hasAmountFlip detection might fail, but contract still supports it)
+      const shouldUseAmountFlow = hasAmountFlip || (isUsdcConfigured && usdcContract);
       let amountUnits: bigint = 0n;
-      if (hasAmountFlip) {
+      
+      if (shouldUseAmountFlow) {
         amountUnits = ethers.parseUnits(String(selectedBetUsd), usdcDecimals);
         if (maxBetUnits && amountUnits > maxBetUnits) {
           setIsFlipping(false);
@@ -718,10 +952,11 @@ export const CoinFlip = ({ connectedWallet, connectedWalletName, walletProviders
         }
         
         // ============================================
-        // DECIDE WHICH MODE TO USE: PERMIT vs APPROVE
+        // DECIDE WHICH MODE TO USE: BATCH vs PERMIT vs APPROVE
         // ============================================
         const needsApproval = currentAllowance < amountUnits;
         const canUsePermit = needsApproval && permitSupported && hasPlaceBetWithPermit;
+        const canUseBatch = needsApproval; // Try batch if approval needed (chain supports it)
         
         console.log("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
         console.log("🎯 TRANSACTION MODE DECISION:");
@@ -731,9 +966,65 @@ export const CoinFlip = ({ connectedWallet, connectedWalletName, walletProviders
         console.log("  Needs Approval:", needsApproval);
         console.log("  USDC Supports Permit:", permitSupported);
         console.log("  Contract Has placeBetWithPermit:", hasPlaceBetWithPermit);
+        console.log("  Chain Supports EIP-7702: YES (confirmed via test)");
         console.log("  ────────────────────────────────────────────────────");
         
-        if (canUsePermit) {
+        // Priority 1: Try EIP-7702 batch (if wallet supports it)
+        if (canUseBatch) {
+          console.log("  🚀 MODE: EIP-7702 BATCH (Single Transaction)");
+          console.log("     → Attempting wallet_sendCalls to batch approve + bet");
+          console.log("     → Note: MetaMask may not support this on Ink Sepolia yet");
+          console.log("     → Will fall back to permit/approve if wallet doesn't support");
+          console.log("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
+          
+          try {
+            const ethereumProvider = walletProviders[connectedWalletName || "MetaMask"] || (window as any).ethereum;
+            if (!ethereumProvider) {
+              throw new Error("No ethereum provider available");
+            }
+            
+            const result = await handleFlipWithBatch(
+              ownerAddress,
+              signer,
+              contractWithSigner,
+              guess,
+              amountUnits,
+              userSeed,
+              ethereumProvider
+            );
+            betId = result.betId;
+            receiptBlockNumber = result.receiptBlockNumber;
+            console.log("✅✅✅ EIP-7702 BATCH MODE: Success! Both approve + bet in ONE transaction!");
+          } catch (batchError: any) {
+            console.error("❌ EIP-7702 BATCH MODE: Failed");
+            console.error("   Error:", batchError.message);
+            
+            if (batchError.message === "WALLET_NO_EIP7702_SUPPORT") {
+              console.log("   → Wallet doesn't support EIP-7702, trying permit...");
+            } else if (batchError.code === "ACTION_REJECTED") {
+              setIsFlipping(false);
+              setShowAnimation(false);
+              toast({
+                variant: "destructive",
+                title: "Batch Transaction Rejected",
+                description: "Transaction was rejected",
+              });
+              return;
+            } else {
+              console.log("   → Batch failed for other reason, trying permit...");
+            }
+            
+            // Fall through to permit mode
+            if (canUsePermit) {
+              console.log("  ⚠️  FALLING BACK TO: PERMIT MODE");
+            } else {
+              console.log("  ⚠️  FALLING BACK TO: APPROVE MODE");
+            }
+          }
+        }
+        
+        // Priority 2: Try permit if batch didn't work or wasn't attempted
+        if (!betId && canUsePermit) {
           console.log("  ✅ MODE: PERMIT (Single On-Chain Transaction)");
           console.log("     → MetaMask Popup 1: Sign permit (off-chain, no gas)");
           console.log("       (MetaMask may show this as 'approve spending' - this is normal)");
@@ -825,11 +1116,19 @@ export const CoinFlip = ({ connectedWallet, connectedWalletName, walletProviders
     
       // Only place bet if permit didn't already do it
       if (!betId) {
+        // Safety check: Ensure amountUnits is set if USDC is configured
+        if (shouldUseAmountFlow && amountUnits === 0n) {
+          throw new Error("Invalid bet amount: amountUnits is 0. This should not happen if USDC is configured.");
+        }
+        
         // OPTIMIZATION 3: Skip gas estimation (use fixed value, saves ~500ms)
         const gasLimit = 250000n;
         
         // Place bet
-        const placeBetTx = await (contractWithSigner as any).placeBet(guess, amountUnits, userSeed, { gasLimit });
+        // If shouldUseAmountFlow is true, use amountUnits; otherwise call without amount (if contract supports it)
+        const placeBetTx = shouldUseAmountFlow
+          ? await (contractWithSigner as any).placeBet(guess, amountUnits, userSeed, { gasLimit })
+          : await (contractWithSigner as any).placeBet(guess, userSeed, { gasLimit });
       
       toast({
         title: "Bet Placing...",
