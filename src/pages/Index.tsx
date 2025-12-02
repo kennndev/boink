@@ -890,23 +890,23 @@ const Index = () => {
     ];
 
     return (
-    <div className="fixed inset-0 flex items-center justify-center z-50 p-1 sm:p-4">
+    <div className="fixed inset-0 flex items-center justify-center z-50 p-2 sm:p-4">
       <div className="bg-gray-300 win98-border w-[min(95vw,360px)] sm:w-[min(80vw,480px)] max-h-[95vh] sm:max-h-[80vh] flex flex-col shadow-2xl box-border overflow-hidden">
         {/* Title Bar */}
-        <div className="h-7 sm:h-8 bg-gray-300 win98-border-inset flex items-center justify-between px-1.5 sm:px-2 overflow-hidden">
-          <span className="text-black font-bold text-[10px] sm:text-sm font-military truncate flex-1 mr-1 sm:mr-2">
+        <div className="h-8 sm:h-8 bg-gray-300 win98-border-inset flex items-center justify-between px-2 sm:px-2 overflow-hidden">
+          <span className="text-black font-bold text-xs sm:text-sm font-military truncate flex-1 mr-1 sm:mr-2">
             Connect a Wallet
           </span>
           <button
             onClick={() => setShowWalletModal(false)}
-            className="h-5 w-5 sm:h-6 sm:w-6 win98-border flex items-center justify-center hover:bg-gray-400 flex-shrink-0 touch-target"
+            className="h-7 w-7 sm:h-6 sm:w-6 win98-border flex items-center justify-center hover:bg-gray-400 flex-shrink-0 touch-target min-h-[44px] min-w-[44px]"
           >
-            <span className="text-[10px] sm:text-xs font-bold font-pixel text-gray-700">×</span>
+            <span className="text-sm sm:text-xs font-bold font-pixel text-gray-700">×</span>
           </button>
         </div>
 
         {/* Modal Content */}
-        <div className="flex-1 bg-gray-300 p-1.5 sm:p-4 overflow-y-auto min-h-0" style={{ WebkitOverflowScrolling: 'touch' }}>
+        <div className="flex-1 bg-gray-300 p-3 sm:p-4 overflow-y-auto min-h-0" style={{ WebkitOverflowScrolling: 'touch' }}>
           {/* Mobile Instructions */}
           {isMobile && installedWallets.length === 0 && (
             <div className="win98-border bg-yellow-100 p-2 sm:p-3 mb-2 sm:mb-4">
@@ -926,7 +926,7 @@ const Index = () => {
                   {installedWallets.map((wallet) => (
               <div 
                       key={wallet.name}
-                className="win98-border-inset p-2 sm:p-3 flex items-center gap-2 sm:gap-3 hover:bg-gray-100 cursor-pointer touch-target min-h-[44px]"
+                className="win98-border-inset p-3 sm:p-3 flex items-center gap-2.5 sm:gap-3 hover:bg-gray-100 cursor-pointer touch-target min-h-[52px] sm:min-h-[44px]"
                       onClick={() => handleWalletConnect(wallet.name)}
               >
                       <div className={`w-7 h-7 sm:w-8 sm:h-8 ${wallet.color} flex items-center justify-center win98-border flex-shrink-0`}>
@@ -950,7 +950,7 @@ const Index = () => {
                 {mobileWallets.map((wallet) => (
                   <div 
                     key={wallet.name}
-                    className="win98-border-inset p-2 sm:p-3 flex items-center gap-2 sm:gap-3 hover:bg-gray-100 cursor-pointer touch-target min-h-[44px]"
+                    className="win98-border-inset p-3 sm:p-3 flex items-center gap-2.5 sm:gap-3 hover:bg-gray-100 cursor-pointer touch-target min-h-[52px] sm:min-h-[44px]"
                     onClick={() => handleWalletConnect(wallet.name)}
                   >
                     <div className={`w-7 h-7 sm:w-8 sm:h-8 ${wallet.color} flex items-center justify-center win98-border flex-shrink-0`}>
@@ -971,7 +971,7 @@ const Index = () => {
                 {recommendedWallets.map((wallet) => (
                   <div 
                     key={wallet.name}
-                    className={`win98-border-inset p-2 sm:p-3 flex items-center gap-2 sm:gap-3 touch-target min-h-[44px] ${
+                    className={`win98-border-inset p-3 sm:p-3 flex items-center gap-2 sm:gap-3 touch-target min-h-[52px] sm:min-h-[44px] ${
                       wallet.available ? 'hover:bg-gray-100 cursor-pointer' : 'opacity-50 cursor-not-allowed'
                     }`}
                     onClick={() => wallet.available ? handleWalletConnect(wallet.name) : null}
@@ -1026,24 +1026,33 @@ const Index = () => {
     <div className="h-screen w-screen flex flex-col overflow-hidden">
       {/* Desktop Area */}
       <main className="relative flex-1 overflow-hidden">
-        {/* Desktop Icons – Single column on mobile, CSS columns on larger screens */}
-        <div 
-          className="absolute left-1 sm:left-4 top-1 sm:top-2 bottom-12 z-10 pointer-events-auto pr-1 sm:pr-1 flex flex-col gap-2 desktop-icons-columns" 
-          style={{ maxHeight: 'calc(100vh - 60px)' } as React.CSSProperties}
-        >
-          {/* Mobile: flex-wrap, Desktop: CSS columns */}
-          {desktopApps.map((app) => (
-            <div 
-              key={app.id} 
-              className="desktop-icon-wrapper"
-            >
-              <DesktopIcon
-                icon={app.icon}
-                label={app.label}
-                onClick={() => handleIconClick(app.id)}
-              />
-            </div>
-          ))}
+        {/* Desktop Icons – First 6 in column, last 2 in next column (all devices) */}
+        <div className="absolute left-0.5 sm:left-4 top-1 sm:top-2 bottom-12 sm:bottom-12 z-10 pointer-events-auto pr-0.5 sm:pr-1 flex gap-2 sm:gap-3">
+          {/* First 6 icons in column */}
+          <div className="flex flex-col gap-1.5 sm:gap-1">
+            {desktopApps.slice(0, 6).map((app) => (
+              <div key={app.id} className="desktop-icon-wrapper">
+                <DesktopIcon
+                  icon={app.icon}
+                  label={app.label}
+                  onClick={() => handleIconClick(app.id)}
+                />
+              </div>
+            ))}
+          </div>
+          
+          {/* Last 2 icons in second column */}
+          <div className="flex flex-col gap-1.5 sm:gap-1">
+            {desktopApps.slice(6).map((app) => (
+              <div key={app.id} className="desktop-icon-wrapper">
+                <DesktopIcon
+                  icon={app.icon}
+                  label={app.label}
+                  onClick={() => handleIconClick(app.id)}
+                />
+              </div>
+            ))}
+          </div>
         </div>
 
         {/* Centered wallpaper + BOINK - positioned to avoid icon overlap */}
@@ -1052,13 +1061,14 @@ const Index = () => {
             <h1
               className="
                 uppercase font-pixel font-bold tracking-wider leading-none text-center
-                text-[clamp(1.5rem,15vw,2rem)]
+                text-[clamp(1.25rem,12vw,1.75rem)]
                 sm:text-[clamp(2.5rem,10vw,4rem)]
                 md:text-[clamp(3rem,8vw,5rem)]
                 lg:text-[clamp(3.5rem,7vw,6rem)]
                 xl:text-[clamp(4rem,6vw,7rem)]
-                px-2 sm:px-4
-                mt-4 sm:mt-12 md:mt-16 lg:mt-20
+                px-3 sm:px-4
+                mt-2 sm:mt-12 md:mt-16 lg:mt-20
+                ml-0 sm:ml-0
               "
               style={{
                 color: '#815bf9',
@@ -1125,21 +1135,21 @@ const Index = () => {
 
       {/* Image Modal */}
       {showImageModal && (
-        <div className="fixed inset-0 flex items-center justify-center z-50 p-1 sm:p-4 bg-black bg-opacity-75">
+        <div className="fixed inset-0 flex items-center justify-center z-50 p-2 sm:p-4 bg-black bg-opacity-75">
           <div className="relative w-[95vw] sm:max-w-4xl max-h-[95vh] sm:max-h-[90vh] bg-gray-300 win98-border shadow-2xl overflow-hidden">
             {/* Title Bar */}
-            <div className="h-7 sm:h-8 bg-gray-300 win98-border-inset flex items-center justify-between px-1.5 sm:px-2 overflow-hidden">
-              <span className="text-black font-bold text-[10px] sm:text-sm font-military truncate flex-1 mr-1 sm:mr-2">{showImageModal.alt}</span>
+            <div className="h-8 sm:h-8 bg-gray-300 win98-border-inset flex items-center justify-between px-2 sm:px-2 overflow-hidden">
+              <span className="text-black font-bold text-xs sm:text-sm font-military truncate flex-1 mr-1 sm:mr-2">{showImageModal.alt}</span>
               <button
                 onClick={() => setShowImageModal(null)}
-                className="h-5 w-5 sm:h-6 sm:w-6 win98-border flex items-center justify-center hover:bg-gray-400 flex-shrink-0 touch-target"
+                className="h-7 w-7 sm:h-6 sm:w-6 win98-border flex items-center justify-center hover:bg-gray-400 flex-shrink-0 touch-target min-h-[44px] min-w-[44px]"
               >
-                <span className="text-[10px] sm:text-xs font-bold font-pixel">×</span>
+                <span className="text-sm sm:text-xs font-bold font-pixel">×</span>
               </button>
             </div>
             
             {/* Image Content */}
-            <div className="p-1 sm:p-4">
+            <div className="p-3 sm:p-4">
               <img 
                 src={showImageModal.src} 
                 alt={showImageModal.alt}
