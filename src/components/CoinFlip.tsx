@@ -1015,16 +1015,52 @@ Check console for permit parameters.`);
             }
             
             // Fall through to permit mode
-            if (canUsePermit) {
+            // Re-check permit support in real-time (state might not be updated yet)
+            let realTimeHasPlaceBetWithPermit = hasPlaceBetWithPermit;
+            if (contract && !realTimeHasPlaceBetWithPermit) {
+              try {
+                const func = contract.interface.getFunction("placeBetWithPermit(uint8,uint256,uint256,uint256,uint8,bytes32,bytes32)");
+                if (func) {
+                  realTimeHasPlaceBetWithPermit = true;
+                  console.log("✅ Real-time check: CoinFlip contract supports placeBetWithPermit");
+                }
+              } catch (error) {
+                // Function not found, keep realTimeHasPlaceBetWithPermit as false
+              }
+            }
+            const canUsePermitRealTime = needsApproval && permitSupported && realTimeHasPlaceBetWithPermit;
+            
+            if (canUsePermitRealTime) {
               console.log("  ⚠️  FALLING BACK TO: PERMIT MODE");
             } else {
               console.log("  ⚠️  FALLING BACK TO: APPROVE MODE");
+              if (!permitSupported) {
+                console.log("     Reason: USDC does not support EIP-2612 permit");
+              } else if (!realTimeHasPlaceBetWithPermit) {
+                console.log("     Reason: CoinFlip contract missing placeBetWithPermit function");
+                console.log("     → Check: Is coinFlip.json ABI up to date?");
+              }
             }
           }
         }
         
         // Priority 2: Try permit if batch didn't work or wasn't attempted
-        if (!betId && canUsePermit) {
+        // Re-check permit support in real-time before using it
+        let realTimeHasPlaceBetWithPermit = hasPlaceBetWithPermit;
+        if (contract && !realTimeHasPlaceBetWithPermit) {
+          try {
+            const func = contract.interface.getFunction("placeBetWithPermit(uint8,uint256,uint256,uint256,uint8,bytes32,bytes32)");
+            if (func) {
+              realTimeHasPlaceBetWithPermit = true;
+              console.log("✅ Real-time check: CoinFlip contract supports placeBetWithPermit");
+            }
+          } catch (error) {
+            // Function not found
+          }
+        }
+        const canUsePermitRealTime = needsApproval && permitSupported && realTimeHasPlaceBetWithPermit;
+        
+        if (!betId && canUsePermitRealTime) {
           console.log("  ✅ MODE: PERMIT (Single On-Chain Transaction)");
           console.log("     → MetaMask Popup 1: Sign permit (off-chain, no gas)");
           console.log("       (MetaMask may show this as 'approve spending' - this is normal)");
