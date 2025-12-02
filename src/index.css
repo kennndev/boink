@@ -378,4 +378,18 @@ All colors MUST be HSL.
       max-width: calc(50% - 0.375rem);
     }
   }
+
+  /* Desktop icons: single column on mobile, CSS columns on larger screens */
+  @media (min-width: 640px) {
+    .desktop-icons-columns {
+      display: block;
+      columns: 1 auto;
+      column-gap: 0.75rem;
+    }
+
+    .desktop-icon-wrapper {
+      break-inside: avoid;
+      margin-bottom: 0.5rem;
+    }
+  }
 }
