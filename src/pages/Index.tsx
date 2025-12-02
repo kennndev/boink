@@ -1026,11 +1026,17 @@ const Index = () => {
     <div className="h-screen w-screen flex flex-col overflow-hidden">
       {/* Desktop Area */}
       <main className="relative flex-1 overflow-hidden">
-        {/* Desktop Icons – Single column that wraps to next column when needed */}
-        <div className="absolute left-1 sm:left-4 top-1 sm:top-2 bottom-12 z-10 pointer-events-auto pr-1 sm:pr-1" style={{ maxHeight: 'calc(100vh - 60px)', columns: '1 auto', columnGap: '0.75rem' } as React.CSSProperties}>
-          {/* CSS columns: automatically creates 2nd column when content overflows */}
+        {/* Desktop Icons – Single column on mobile, CSS columns on larger screens */}
+        <div 
+          className="absolute left-1 sm:left-4 top-1 sm:top-2 bottom-12 z-10 pointer-events-auto pr-1 sm:pr-1 flex flex-col gap-2 desktop-icons-columns" 
+          style={{ maxHeight: 'calc(100vh - 60px)' } as React.CSSProperties}
+        >
+          {/* Mobile: flex-wrap, Desktop: CSS columns */}
           {desktopApps.map((app) => (
-            <div key={app.id} style={{ breakInside: 'avoid', marginBottom: '0.5rem' } as React.CSSProperties}>
+            <div 
+              key={app.id} 
+              className="desktop-icon-wrapper"
+            >
               <DesktopIcon
                 icon={app.icon}
                 label={app.label}
