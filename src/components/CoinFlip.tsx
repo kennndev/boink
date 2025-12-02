@@ -39,12 +39,14 @@ export const CoinFlip = ({ connectedWallet, connectedWalletName, walletProviders
   const [contractExists, setContractExists] = useState<boolean>(false);
   const [userPoints, setUserPoints] = useState<number>(0);
   const [oracleStatus, setOracleStatus] = useState<{ configured: boolean; pendingBets: number } | null>(null);
+  const [permitSupported, setPermitSupported] = useState<boolean>(false);
+  const [hasPlaceBetWithPermit, setHasPlaceBetWithPermit] = useState<boolean>(false);
   const { toast } = useToast();
 
   // Contract addresses
   const CONTRACT_ADDRESS = import.meta.env.VITE_COINFLIP_CONTRACT_ADDRESS || "";
   const USDC_ADDRESS = import.meta.env.VITE_USDC_CONTRACT_ADDRESS || "";
-  const EXPECTED_CHAIN_ID = import.meta.env.VITE_CHAIN_ID || "763373"; // Base Sepolia by default
+  const EXPECTED_CHAIN_ID = import.meta.env.VITE_CHAIN_ID || "763373"; // ink sepolia by default
   
   // Check if contract address is properly configured
   const isContractConfigured = CONTRACT_ADDRESS && CONTRACT_ADDRESS !== "0x0000000000000000000000000000000000000000";
@@ -71,7 +73,6 @@ export const CoinFlip = ({ connectedWallet, connectedWalletName, walletProviders
           if (currentChainId !== EXPECTED_CHAIN_ID) {
             const networkNames: Record<string, string> = {
               "763373": "Ink Sepolia",
-              "8453": "Base Mainnet",
               "1": "Ethereum Mainnet",
               "11155111": "Sepolia",
             };
@@ -149,15 +150,23 @@ export const CoinFlip = ({ connectedWallet, connectedWalletName, walletProviders
             return;
           }
           
-          // Setup USDC contract
+          // Setup USDC contract with permit support
           const erc20Abi = [
             "function approve(address spender, uint256 value) external returns (bool)",
             "function allowance(address owner, address spender) external view returns (uint256)",
             "function balanceOf(address account) external view returns (uint256)",
-            "function decimals() external view returns (uint8)"
+            "function decimals() external view returns (uint8)",
+            "function DOMAIN_SEPARATOR() external view returns (bytes32)",
+            "function nonces(address owner) external view returns (uint256)",
+            "function name() external view returns (string)",
+            "function permit(address owner, address spender, uint256 value, uint256 deadline, uint8 v, bytes32 r, bytes32 s) external"
           ];
           const usdc = new ethers.Contract(usdcAddress, erc20Abi, browserProvider);
           setUsdcContract(usdc);
+          
+          // Check if USDC supports permit (EIP-2612) - comprehensive check
+          const usdcPermitSupported = await checkUSDCPermitSupport(usdc);
+          setPermitSupported(usdcPermitSupported);
           
           // Load user stats
           loadUserStats(coinFlipContract);
@@ -200,7 +209,7 @@ export const CoinFlip = ({ connectedWallet, connectedWalletName, walletProviders
           try {
             let amountFlipDetected = false;
             try {
-              coinFlipContract.interface.getFunction("flip(uint8,uint256,uint256)");
+              coinFlipContract.interface.getFunction("placeBet(uint8,uint256,uint256)");
               amountFlipDetected = true;
             } catch {}
             setHasAmountFlip(amountFlipDetected);
@@ -211,6 +220,19 @@ export const CoinFlip = ({ connectedWallet, connectedWalletName, walletProviders
               quoteDetected = true;
             } catch {}
             setHasQuotePayout(quoteDetected);
+            
+            // Check if contract has placeBetWithPermit function
+            let permitBetDetected = false;
+            try {
+              const func = coinFlipContract.interface.getFunction("placeBetWithPermit(uint8,uint256,uint256,uint256,uint8,bytes32,bytes32)");
+              if (func) {
+                permitBetDetected = true;
+                console.log("✅ CoinFlip contract supports placeBetWithPermit");
+              }
+            } catch (error) {
+              console.log("⚠️ CoinFlip contract does not have placeBetWithPermit:", error);
+            }
+            setHasPlaceBetWithPermit(permitBetDetected);
           } catch (e) {
             console.warn("⚠️ Capability detect error", e);
           }
@@ -288,6 +310,83 @@ export const CoinFlip = ({ connectedWallet, connectedWalletName, walletProviders
     };
     fetchDecimalsAndPayout();
   }, [contract, usdcContract, selectedBetUsd, hasAmountFlip, hasQuotePayout, contractExists]);
+
+  /**
+   * ============================================================================
+   * EXPLANATION: Why We Can't Have True "One-Click, One Transaction" UX
+   * ============================================================================
+   * 
+   * There are two possible flows:
+   * 
+   * 1. APPROVE MODE (Current fallback):
+   *    - Transaction 1: User approves CoinFlip contract to spend USDC
+   *    - Transaction 2: User places bet
+   *    - Result: TWO MetaMask popups (one for approve, one for bet)
+   *    - Why: These are two separate on-chain transactions. Each on-chain tx
+   *           requires its own MetaMask confirmation.
+   * 
+   * 2. PERMIT MODE (If USDC supports EIP-2612):
+   *    - Step 1: User signs permit message OFF-CHAIN (no gas, but still a popup)
+   *    - Step 2: One on-chain transaction that does permit + placeBetWithPermit
+   *    - Result: TWO MetaMask popups (one for signing, one for transaction)
+   *    - Why: Even though it's one on-chain transaction, the user must still
+   *           sign the permit message first. This is a security requirement.
+   * 
+   * WHY WE CAN'T ELIMINATE ALL POPUPS:
+   * - To move user's tokens, we MUST have their explicit permission
+   * - This permission can be given via:
+   *   a) On-chain approve() transaction (requires popup)
+   *   b) Off-chain permit signature (requires popup for signing)
+   * - There is NO way to move tokens without user approval - this is by design
+   *   for security. Zero popups = security disaster.
+   * 
+   * BEST CASE SCENARIO:
+   * - First bet: 2 popups (approve once with large cap, then bet)
+   * - Subsequent bets: 1 popup (just bet, approval already exists)
+   * 
+   * ============================================================================
+   */
+  
+  // Comprehensive USDC permit support check
+  const checkUSDCPermitSupport = async (usdcContract: ethers.Contract): Promise<boolean> => {
+    try {
+      console.log("🔍 Checking USDC permit support...");
+      
+      // Check DOMAIN_SEPARATOR
+      const domainSep = await usdcContract.DOMAIN_SEPARATOR();
+      if (!domainSep || domainSep === "0x0000000000000000000000000000000000000000000000000000000000000000") {
+        console.log("❌ USDC DOMAIN_SEPARATOR is zero or invalid");
+        return false;
+      }
+      console.log("✅ USDC has DOMAIN_SEPARATOR:", domainSep);
+      
+      // Check nonces function exists
+      try {
+        const testNonce = await usdcContract.nonces("0x0000000000000000000000000000000000000000");
+        console.log("✅ USDC has nonces() function");
+      } catch {
+        console.log("❌ USDC nonces() function not available");
+        return false;
+      }
+      
+      // Check permit function exists in ABI
+      try {
+        const permitFunc = usdcContract.interface.getFunction("permit");
+        if (permitFunc) {
+          console.log("✅ USDC has permit() function in ABI");
+        }
+      } catch {
+        console.log("❌ USDC permit() function not in ABI");
+        return false;
+      }
+      
+      console.log("✅✅✅ USDC FULLY SUPPORTS EIP-2612 PERMIT");
+      return true;
+    } catch (error: any) {
+      console.log("❌ USDC permit check failed:", error.message);
+      return false;
+    }
+  };
 
   const loadUserStats = async (contract: ethers.Contract) => {
     try {
@@ -399,6 +498,116 @@ export const CoinFlip = ({ connectedWallet, connectedWalletName, walletProviders
     return true;
   };
 
+  // Use permit + placeBetWithPermit for single transaction (EIP-2612)
+  const handleFlipWithPermit = async (
+    ownerAddress: string,
+    signer: ethers.Signer,
+    contractWithSigner: ethers.BaseContract,
+    guess: number,
+    amountUnits: bigint,
+    userSeed: number
+  ) => {
+    const deadline = Math.floor(Date.now() / 1000) + 3600; // 1 hour from now
+    
+    try {
+      // Get nonce for permit
+      const nonce = await usdcContract!.nonces(ownerAddress);
+      
+      // Get token name and chain ID for EIP-712 domain
+      const [tokenName, network] = await Promise.all([
+        usdcContract!.name(),
+        provider!.getNetwork()
+      ]);
+      
+      // Create EIP-712 domain for permit
+      const domain = {
+        name: tokenName,
+        version: "1",
+        chainId: network.chainId,
+        verifyingContract: await usdcContract!.getAddress(),
+      };
+      
+      // EIP-712 types for permit
+      const types = {
+        Permit: [
+          { name: "owner", type: "address" },
+          { name: "spender", type: "address" },
+          { name: "value", type: "uint256" },
+          { name: "nonce", type: "uint256" },
+          { name: "deadline", type: "uint256" },
+        ],
+      };
+      
+      // Permit values - approve exact amount needed for this bet
+      const value = {
+        owner: ownerAddress,
+        spender: CONTRACT_ADDRESS,
+        value: amountUnits,
+        nonce: nonce,
+        deadline: deadline,
+      };
+      
+      toast({
+        title: "Signing Permit",
+        description: "Please sign the permit message (off-chain, no gas cost)",
+      });
+      
+      console.log("📝 Step 1: Signing permit off-chain (MetaMask will show 'approve spending' but this is just a signature, no gas)");
+      // Sign the permit using EIP-712 typed data signing (off-chain, no gas)
+      const signature = await signer.signTypedData(domain, types, value);
+      console.log("✅ Permit signed successfully (off-chain, no gas paid)");
+      const { v, r, s } = ethers.Signature.from(signature);
+      
+      toast({
+        title: "Placing Bet with Permit",
+        description: "Sending permit + bet in one transaction...",
+      });
+      
+      console.log("📤 Step 2: Sending ONE on-chain transaction (permit + placeBetWithPermit combined)");
+      // Call placeBetWithPermit on the contract (single transaction!)
+      // Function signature: placeBetWithPermit(uint8 guess, uint256 amount, uint256 seed, uint256 deadline, uint8 v, bytes32 r, bytes32 s)
+      const gasLimit = 300000n;
+      const placeBetTx = await (contractWithSigner as any).placeBetWithPermit(
+        guess,
+        amountUnits,
+        userSeed,
+        deadline,
+        v,
+        r,
+        s,
+        { gasLimit }
+      );
+      
+      toast({
+        title: "Bet Placing...",
+        description: "Transaction sent with permit",
+      });
+      
+      const receipt = await placeBetTx.wait(1);
+      const betPlacedEvent = receipt.logs.find((log: any) => {
+        try {
+          const parsed = contractWithSigner.interface.parseLog(log);
+          return parsed?.name === "BetPlaced";
+        } catch {
+          return false;
+        }
+      });
+      
+      if (!betPlacedEvent) {
+        throw new Error("BetPlaced event not found");
+      }
+      
+      const betPlacedParsed = contractWithSigner.interface.parseLog(betPlacedEvent);
+      return {
+        betId: betPlacedParsed.args.betId,
+        receiptBlockNumber: Number(receipt.blockNumber),
+      };
+    } catch (error: any) {
+      console.error("Permit transaction failed:", error);
+      throw error;
+    }
+  };
+
   const handleFlip = async () => {
     // Debug logging
     console.log('Flip button clicked', {
@@ -464,6 +673,10 @@ export const CoinFlip = ({ connectedWallet, connectedWalletName, walletProviders
       // Convert side to contract format (0 = heads, 1 = tails)
       const guess = currentGuess === "heads" ? 0 : 1;
       
+      // Shared vars for both paths
+      let betId: any = null;
+      let receiptBlockNumber: bigint | number | null = null;
+      
       // Amount in USDC smallest units
       let amountUnits: bigint = 0n;
       if (hasAmountFlip) {
@@ -504,30 +717,119 @@ export const CoinFlip = ({ connectedWallet, connectedWalletName, walletProviders
           return;
         }
         
-        // OPTIMIZATION 2: Only approve if needed
-        if (currentAllowance < amountUnits) {
+        // ============================================
+        // DECIDE WHICH MODE TO USE: PERMIT vs APPROVE
+        // ============================================
+        const needsApproval = currentAllowance < amountUnits;
+        const canUsePermit = needsApproval && permitSupported && hasPlaceBetWithPermit;
+        
+        console.log("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
+        console.log("🎯 TRANSACTION MODE DECISION:");
+        console.log("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
+        console.log("  Current Allowance:", ethers.formatUnits(currentAllowance, usdcDecimals), "USDC");
+        console.log("  Bet Amount:", ethers.formatUnits(amountUnits, usdcDecimals), "USDC");
+        console.log("  Needs Approval:", needsApproval);
+        console.log("  USDC Supports Permit:", permitSupported);
+        console.log("  Contract Has placeBetWithPermit:", hasPlaceBetWithPermit);
+        console.log("  ────────────────────────────────────────────────────");
+        
+        if (canUsePermit) {
+          console.log("  ✅ MODE: PERMIT (Single On-Chain Transaction)");
+          console.log("     → MetaMask Popup 1: Sign permit (off-chain, no gas)");
+          console.log("       (MetaMask may show this as 'approve spending' - this is normal)");
+          console.log("     → MetaMask Popup 2: One on-chain transaction");
+          console.log("       (This transaction does: permit + placeBetWithPermit)");
+          console.log("     → Result: 2 MetaMask popups, but only 1 on-chain transaction");
+          console.log("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
+          
+          // ========== PERMIT MODE ==========
           try {
-            await ensureAllowance(amountUnits, provider, usdcContract!, ownerAddress);
-          } catch (approvalError: any) {
-            setIsFlipping(false);
-            setShowAnimation(false);
-            if (approvalError.code === "ACTION_REJECTED") {
+            const result = await handleFlipWithPermit(
+              ownerAddress,
+              signer,
+              contractWithSigner,
+              guess,
+              amountUnits,
+              userSeed
+            );
+            betId = result.betId;
+            receiptBlockNumber = result.receiptBlockNumber;
+            console.log("✅ PERMIT MODE: Success! Bet placed in single transaction");
+          } catch (permitError: any) {
+            console.error("❌ PERMIT MODE: Failed, falling back to APPROVE mode");
+            console.error("   Error:", permitError.message);
+            
+            if (permitError.code === "ACTION_REJECTED") {
+              setIsFlipping(false);
+              setShowAnimation(false);
               toast({
                 variant: "destructive",
-                title: "Approval Rejected",
-                description: "You must approve USDC spending to play",
+                title: "Permit Rejected",
+                description: "You must sign the permit to play",
               });
+              return;
             }
-            return;
+            
+            // Fall through to APPROVE mode
+            console.log("  ⚠️  FALLING BACK TO: APPROVE MODE");
+            try {
+              await ensureAllowance(amountUnits, provider, usdcContract!, ownerAddress);
+            } catch (approvalError: any) {
+              setIsFlipping(false);
+              setShowAnimation(false);
+              if (approvalError.code === "ACTION_REJECTED") {
+                toast({
+                  variant: "destructive",
+                  title: "Approval Rejected",
+                  description: "You must approve USDC spending to play",
+                });
+              }
+              return;
+            }
+          }
+        } else {
+          // ========== APPROVE MODE ==========
+          if (needsApproval) {
+            console.log("  ⚠️  MODE: APPROVE (Two Transactions)");
+            if (!permitSupported) {
+              console.log("     Reason: USDC does not support EIP-2612 permit");
+            } else if (!hasPlaceBetWithPermit) {
+              console.log("     Reason: CoinFlip contract missing placeBetWithPermit function");
+              console.log("     → Check: Is coinFlip.json ABI up to date?");
+            }
+            console.log("     → Transaction 1: approve() - Set spending cap");
+            console.log("     → Transaction 2: placeBet() - Place bet");
+            console.log("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
+            
+            try {
+              await ensureAllowance(amountUnits, provider, usdcContract!, ownerAddress);
+            } catch (approvalError: any) {
+              setIsFlipping(false);
+              setShowAnimation(false);
+              if (approvalError.code === "ACTION_REJECTED") {
+                toast({
+                  variant: "destructive",
+                  title: "Approval Rejected",
+                  description: "You must approve USDC spending to play",
+                });
+              }
+              return;
+            }
+          } else {
+            console.log("  ✅ MODE: DIRECT BET (No Approval Needed)");
+            console.log("     → Allowance already sufficient, placing bet directly");
+            console.log("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
           }
         }
       }
     
-      // OPTIMIZATION 3: Skip gas estimation (use fixed value, saves ~500ms)
-      const gasLimit = 250000n;
-      
-      // Place bet
-      const placeBetTx = await (contractWithSigner as any).placeBet(guess, amountUnits, userSeed, { gasLimit });
+      // Only place bet if permit didn't already do it
+      if (!betId) {
+        // OPTIMIZATION 3: Skip gas estimation (use fixed value, saves ~500ms)
+        const gasLimit = 250000n;
+        
+        // Place bet
+        const placeBetTx = await (contractWithSigner as any).placeBet(guess, amountUnits, userSeed, { gasLimit });
       
       toast({
         title: "Bet Placing...",
@@ -550,12 +852,18 @@ export const CoinFlip = ({ connectedWallet, connectedWalletName, walletProviders
       }
       
       const betPlacedParsed = contract.interface.parseLog(betPlacedEvent);
-      const betId = betPlacedParsed.args.betId;
+      betId = betPlacedParsed.args.betId;
+      receiptBlockNumber = Number(receipt.blockNumber);
       
       toast({
         title: "Bet Placed!",
         description: "Resolving...",
       });
+      }
+      
+      if (!betId) {
+        throw new Error("BetPlaced event not found");
+      }
       
       // OPTIMIZATION: Call backend and use outcome immediately (no waiting for chain)
       const resolveResult = await resolveBetImmediately(betId, userSeed);
@@ -612,7 +920,7 @@ export const CoinFlip = ({ connectedWallet, connectedWalletName, walletProviders
               resolved = true;
               const currentBlock = await provider.getBlockNumber();
               const placedBlock = Number(betInfo.placedAtBlock);
-              const fromBlock = Math.max(placedBlock, receipt.blockNumber);
+              const fromBlock = Math.max(placedBlock, receiptBlockNumber !== null ? Number(receiptBlockNumber) : placedBlock);
               const toBlock = Math.min(placedBlock + 5, currentBlock);
               
               const filter = contract.filters.BetResolved(betId);
