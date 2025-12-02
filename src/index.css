@@ -379,17 +379,21 @@ All colors MUST be HSL.
     }
   }
 
-  /* Desktop icons: single column on mobile, CSS columns on larger screens */
+  /* Desktop icons: single column on mobile, flex column on larger screens */
   @media (min-width: 640px) {
     .desktop-icons-columns {
-      display: block;
-      columns: 1 auto;
-      column-gap: 0.75rem;
+      display: flex;
+      flex-direction: column;
+      gap: 0.5rem;
+      height: auto;
+      max-height: 100%;
+      overflow-y: auto;
+      overflow-x: hidden;
     }
 
     .desktop-icon-wrapper {
-      break-inside: avoid;
-      margin-bottom: 0.5rem;
+      flex-shrink: 0;
+      margin-bottom: 0;
     }
   }
 }
