@@ -139,6 +139,128 @@ const Index = () => {
     }
   }, []);
 
+  // Restore wallet connection from localStorage on page load
+  useEffect(() => {
+    if (typeof window === "undefined") {
+      return;
+    }
+
+    const restoreWalletConnection = async () => {
+      const savedWallet = localStorage.getItem('coinflip_connectedWallet');
+      const savedWalletName = localStorage.getItem('coinflip_connectedWalletName');
+      
+      if (!savedWallet || !savedWalletName) {
+        return; // No saved connection
+      }
+
+      // Wait for wallet providers to be detected, then try to restore
+      const checkAndRestore = () => {
+        const extendedWindow = window as Window & {
+          ethereum?: EthereumProvider;
+          phantom?: { ethereum?: EthereumProvider };
+          rabby?: EthereumProvider;
+          backpack?: EthereumProvider & { ethereum?: EthereumProvider };
+          coinbaseWalletExtension?: EthereumProvider;
+          zerion?: EthereumProvider;
+        };
+
+        const providerCandidates: EthereumProvider[] = Array.isArray(extendedWindow.ethereum?.providers)
+          ? (extendedWindow.ethereum?.providers ?? []).filter(
+              (provider): provider is EthereumProvider => Boolean(provider)
+            )
+          : extendedWindow.ethereum
+          ? [extendedWindow.ethereum]
+          : [];
+
+        const findByFlag = (flag: keyof EthereumProvider) =>
+          providerCandidates.find((provider) => provider?.[flag]);
+
+        let provider: EthereumProvider | undefined;
+
+        if (savedWalletName === "MetaMask") {
+          provider = findByFlag("isMetaMask");
+        } else if (savedWalletName === "Rabby Wallet") {
+          provider = findByFlag("isRabby") ?? extendedWindow.rabby;
+        } else if (savedWalletName === "Coinbase Wallet") {
+          provider = findByFlag("isCoinbaseWallet") ?? extendedWindow.coinbaseWalletExtension;
+        } else if (savedWalletName === "Zerion") {
+          provider = extendedWindow.zerion || (window as any).zerion || 
+            providerCandidates.find((p: any) => p?.isZerion || p?.isZerionWallet || p?._isZerion);
+        } else if (savedWalletName === "WalletConnect") {
+          // WalletConnect needs to be re-initialized, skip auto-restore
+          return;
+        }
+
+        if (!provider || typeof provider.request !== "function") {
+          // Provider not available, clear saved connection
+          localStorage.removeItem('coinflip_connectedWallet');
+          localStorage.removeItem('coinflip_connectedWalletName');
+          return;
+        }
+
+        // Try to get accounts from the provider
+        provider.request({ method: 'eth_accounts' })
+          .then((accounts: string[]) => {
+            if (accounts && accounts.length > 0 && accounts[0].toLowerCase() === savedWallet.toLowerCase()) {
+              // Wallet is still connected with the same address
+              setConnectedWallet(savedWallet);
+              setConnectedWalletName(savedWalletName);
+              setWalletProviders(prev => ({ ...prev, [savedWalletName]: provider! }));
+              console.log('✅ Restored wallet connection:', savedWalletName, savedWallet);
+            } else {
+              // Wallet address changed or disconnected
+              localStorage.removeItem('coinflip_connectedWallet');
+              localStorage.removeItem('coinflip_connectedWalletName');
+            }
+          })
+          .catch((error) => {
+            console.error('Error checking wallet connection:', error);
+            localStorage.removeItem('coinflip_connectedWallet');
+            localStorage.removeItem('coinflip_connectedWalletName');
+          });
+      };
+
+      // Wait a bit for providers to initialize, then check
+      setTimeout(checkAndRestore, 1000);
+    };
+
+    restoreWalletConnection();
+
+    // Listen for wallet disconnection/account changes
+    const handleAccountsChanged = (accounts: string[]) => {
+      const savedWallet = localStorage.getItem('coinflip_connectedWallet');
+      if (savedWallet && (!accounts || accounts.length === 0 || accounts[0].toLowerCase() !== savedWallet.toLowerCase())) {
+        // Wallet disconnected or account changed
+        setConnectedWallet(null);
+        setConnectedWalletName(null);
+        localStorage.removeItem('coinflip_connectedWallet');
+        localStorage.removeItem('coinflip_connectedWalletName');
+        console.log('Wallet disconnected or account changed');
+      }
+    };
+
+    // Listen to ethereum provider events
+    const ethereum = (window as any).ethereum;
+    if (ethereum) {
+      if (ethereum.on) {
+        ethereum.on('accountsChanged', handleAccountsChanged);
+      } else if (ethereum.addEventListener) {
+        ethereum.addEventListener('accountsChanged', handleAccountsChanged);
+      }
+    }
+
+    return () => {
+      // Cleanup listeners
+      if (ethereum) {
+        if (ethereum.removeListener) {
+          ethereum.removeListener('accountsChanged', handleAccountsChanged);
+        } else if (ethereum.removeEventListener) {
+          ethereum.removeEventListener('accountsChanged', handleAccountsChanged);
+        }
+      }
+    };
+  }, []);
+
   // Detect available wallets on component mount
   useEffect(() => {
     if (typeof window === "undefined") {
@@ -378,6 +500,11 @@ const Index = () => {
           if (walletAddress) {
             setConnectedWallet(walletAddress);
             setConnectedWalletName("WalletConnect");
+            
+            // Save to localStorage for persistence
+            localStorage.setItem('coinflip_connectedWallet', walletAddress);
+            localStorage.setItem('coinflip_connectedWalletName', "WalletConnect");
+            
             setShowWalletModal(false);
             toast({
               title: "Wallet Connected",
@@ -552,6 +679,11 @@ const Index = () => {
         const walletAddress = accounts[0];
         setConnectedWallet(walletAddress);
         setConnectedWalletName(walletName);
+        
+        // Save to localStorage for persistence
+        localStorage.setItem('coinflip_connectedWallet', walletAddress);
+        localStorage.setItem('coinflip_connectedWalletName', walletName);
+        
         setShowWalletModal(false);
         toast({
           title: "Wallet Connected",
@@ -1355,6 +1487,11 @@ const Index = () => {
               if (walletAddress) {
                 setConnectedWallet(walletAddress);
                 setConnectedWalletName("WalletConnect");
+                
+                // Save to localStorage for persistence
+                localStorage.setItem('coinflip_connectedWallet', walletAddress);
+                localStorage.setItem('coinflip_connectedWalletName', "WalletConnect");
+                
                 setShowWalletModal(false);
                 toast({
                   title: "Wallet Connected",
