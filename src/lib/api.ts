@@ -153,13 +153,14 @@ export async function awardTwitterFollowPoints(walletAddress: string): Promise<{
 /**
  * Award points for referral
  */
-export async function awardReferralPoints(walletAddress: string): Promise<{ success: boolean; points?: number; pointsAwarded?: number; message?: string }> {
+export async function awardReferralPoints(walletAddress: string, referrerAddress: string): Promise<{ success: boolean; points?: number; pointsAwarded?: number; message?: string }> {
   try {
     const response = await fetch(`${API_BASE_URL}/users/${walletAddress}/referral`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
       },
+      body: JSON.stringify({ referrerAddress }),
     });
     
     const data = await response.json();
