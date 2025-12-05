@@ -64,7 +64,7 @@ const Index = () => {
     if (twitterSuccess === 'true') {
       toast({
         title: "🎉 Points Awarded!",
-        description: `You earned 10 points for following on Twitter! Total: ${points} points`,
+        description: `You earned 50 points for following on Twitter! Total: ${points} points`,
       });
       // Clean up URL
       const url = new URL(window.location.href);
@@ -152,6 +152,7 @@ const Index = () => {
         rabby?: EthereumProvider;
         backpack?: EthereumProvider & { ethereum?: EthereumProvider };
         coinbaseWalletExtension?: EthereumProvider;
+        zerion?: EthereumProvider;
       };
 
       const providerCandidates: EthereumProvider[] = Array.isArray(extendedWindow.ethereum?.providers)
@@ -173,6 +174,87 @@ const Index = () => {
         detected.push(name);
       };
 
+      // Special handling for Zerion - check multiple possible locations
+      const findZerion = () => {
+        // Check provider candidates for Zerion-specific properties
+        const zerionInProviders = providerCandidates.find((p: any) => {
+          if (!p) return false;
+          
+          // Check all possible Zerion identifiers
+          const isZerion = 
+            p.isZerion || 
+            p.isZerionWallet ||
+            p._isZerion ||
+            p.constructor?.name?.includes('Zerion') ||
+            p.constructor?.name?.includes('zerion') ||
+            (p as any)?.[Symbol.toStringTag]?.includes('Zerion') ||
+            String(p).includes('Zerion') ||
+            // Check if provider has Zerion in any string property
+            Object.values(p).some((val: any) => 
+              typeof val === 'string' && val.toLowerCase().includes('zerion')
+            );
+          
+          if (isZerion) {
+            console.log('✅ Found Zerion in provider candidates:', p);
+          }
+          return isZerion;
+        });
+        
+        // Check window.zerion directly
+        const zerionDirect = extendedWindow.zerion || (window as any).zerion;
+        if (zerionDirect) {
+          console.log('✅ Found Zerion in window.zerion:', zerionDirect);
+        }
+        
+        // Check if Zerion is in window.ethereum.providers but not detected
+        const ethereumProviders = (window as any).ethereum?.providers;
+        if (Array.isArray(ethereumProviders)) {
+          const zerionInEthereumProviders = ethereumProviders.find((p: any) => {
+            if (!p) return false;
+            return p.isZerion || p.isZerionWallet || p._isZerion ||
+                   p.constructor?.name?.includes('Zerion') ||
+                   String(p).includes('Zerion');
+          });
+          if (zerionInEthereumProviders) {
+            console.log('✅ Found Zerion in window.ethereum.providers:', zerionInEthereumProviders);
+            return zerionInEthereumProviders;
+          }
+        }
+        
+        // Debug: Log all providers if Zerion not found
+        if (!zerionInProviders && !zerionDirect) {
+          console.log('🔍 Zerion not found. Checking all providers...');
+          console.log('Provider candidates count:', providerCandidates.length);
+          console.log('window.ethereum:', (window as any).ethereum);
+          console.log('window.ethereum.providers:', (window as any).ethereum?.providers);
+          console.log('window.zerion:', (window as any).zerion);
+          
+          providerCandidates.forEach((p: any, i: number) => {
+            const allKeys = Object.keys(p || {});
+            const zerionRelatedKeys = allKeys.filter(k => 
+              k.toLowerCase().includes('zerion') || 
+              k.toLowerCase().includes('wallet')
+            );
+            const stringValues = Object.values(p || {}).filter(v => typeof v === 'string').slice(0, 5);
+            
+            console.log(`Provider ${i}:`, {
+              constructor: p?.constructor?.name,
+              hasRequest: typeof p?.request === 'function',
+              isMetaMask: p?.isMetaMask,
+              isCoinbaseWallet: p?.isCoinbaseWallet,
+              isRabby: p?.isRabby,
+              isPhantom: p?.isPhantom,
+              isBackpack: p?.isBackpack,
+              zerionRelatedKeys: zerionRelatedKeys.length > 0 ? zerionRelatedKeys : 'none',
+              stringValues: stringValues,
+              allKeys: allKeys.slice(0, 20),
+            });
+          });
+        }
+        
+        return zerionInProviders || zerionDirect;
+      };
+
       const findByFlag = (flag: keyof EthereumProvider) =>
         providerCandidates.find((provider) => provider?.[flag]);
 
@@ -187,6 +269,32 @@ const Index = () => {
         "Coinbase Wallet",
         findByFlag("isCoinbaseWallet") ?? extendedWindow.coinbaseWalletExtension
       );
+      const zerionProvider = findZerion();
+      register("Zerion", zerionProvider);
+      
+      // Fallback: If Zerion extension is installed but not detected, 
+      // check if it's available via window.ethereum or as a provider
+      if (!zerionProvider && providerCandidates.length > 0) {
+        // Check if any undetected provider might be Zerion
+        // (This is a fallback in case Zerion doesn't expose standard flags)
+        const possibleZerion = providerCandidates.find((p: any, i: number) => {
+          // Skip already detected wallets
+          const isDetected = detected.some(name => {
+            const detectedProvider = providerMap[name];
+            return detectedProvider === p;
+          });
+          if (isDetected) return false;
+          
+          // Check for any Zerion-like indicators
+          const providerStr = JSON.stringify(p).toLowerCase();
+          return providerStr.includes('zerion');
+        });
+        
+        if (possibleZerion) {
+          console.log('⚠️ Possible Zerion provider found but not confirmed:', possibleZerion);
+          // Don't auto-register, but log for debugging
+        }
+      }
 
       if (detected.length === 0 && providerCandidates[0]) {
         providerMap["Ethereum Wallet"] = providerCandidates[0];
@@ -287,54 +395,172 @@ const Index = () => {
         return;
       }
 
-      const provider =
-        walletProviders[walletName] ??
-        walletProviders["Ethereum Wallet"] ??
-        (window as any).ethereum;
-
-      if (!provider || typeof provider.request !== "function") {
-        if (isMobile) {
-          // On mobile, guide user to open in wallet browser
-          const walletLinks: Record<string, string> = {
-            "MetaMask": "https://metamask.app.link/dapp/" + window.location.href.replace(/^https?:\/\//, ''),
-            "Coinbase Wallet": "https://go.cb-w.com/dapp?cb_url=" + encodeURIComponent(window.location.href),
-            "Trust Wallet": "https://link.trustwallet.com/open_url?coin_id=60&url=" + encodeURIComponent(window.location.href),
-          };
+      // Special handling for Zerion - try multiple ways to access it
+      let provider: EthereumProvider | undefined;
+      if (walletName === "Zerion") {
+        console.log('🔍 Attempting to connect to Zerion...');
+        console.log('Checking walletProviders["Zerion"]:', walletProviders["Zerion"]);
+        console.log('Checking window.zerion:', (window as any).zerion);
+        console.log('Checking window.ethereum:', (window as any).ethereum);
+        console.log('Checking window.ethereum.providers:', (window as any).ethereum?.providers);
+        
+        // Try to find Zerion in multiple ways
+        provider = walletProviders["Zerion"] 
+          ?? (window as any).zerion
+          ?? (window as any).ethereum?.providers?.find((p: any) => {
+            const isZerion = p?.isZerion || p?.isZerionWallet || p?._isZerion;
+            if (isZerion) console.log('✅ Found Zerion in providers array:', p);
+            return isZerion;
+          });
+        
+        // If Zerion not found, check if window.ethereum itself might be Zerion
+        // (when Zerion is the primary provider)
+        if (!provider && (window as any).ethereum) {
+          const ethereumProvider = (window as any).ethereum;
+          // Check if this provider might be Zerion by checking internal properties
+          const mightBeZerion = 
+            ethereumProvider.isZerion || 
+            ethereumProvider.isZerionWallet ||
+            ethereumProvider._isZerion ||
+            ethereumProvider.constructor?.name?.includes('Zerion') ||
+            String(ethereumProvider).includes('Zerion') ||
+            // Check if the provider has Zerion-specific methods or properties
+            (typeof ethereumProvider._state === 'object' && 
+             JSON.stringify(ethereumProvider._state || {}).toLowerCase().includes('zerion'));
           
-          const deepLink = walletLinks[walletName];
-          if (deepLink) {
-            toast({
-              title: `Open in ${walletName}`,
-              description: `Opening ${walletName} app...`,
-            });
-            window.location.href = deepLink;
-            return;
+          if (mightBeZerion) {
+            console.log('✅ window.ethereum appears to be Zerion');
+            provider = ethereumProvider;
+          } else {
+            console.log('⚠️ window.ethereum is not Zerion, but will use it as fallback');
+            // Still use it as fallback - Zerion might work through window.ethereum
+            provider = ethereumProvider;
           }
         }
         
-        throw new Error(`${walletName} not detected. ${isMobile ? 'Please open this page in your wallet browser or install ' + walletName : 'Please install the browser extension.'}`);
+        // Final fallback
+        if (!provider) {
+          provider = walletProviders["Ethereum Wallet"] ?? (window as any).ethereum;
+        }
+          
+        console.log('Selected Zerion provider:', provider);
+        if (provider) {
+          console.log('Provider type:', provider.constructor?.name);
+          console.log('Provider keys (first 15):', Object.keys(provider).slice(0, 15));
+          
+          // Check if it's a Proxy by checking the string representation (safer than instanceof)
+          const providerStr = String(provider);
+          const isProxy = providerStr.includes('Proxy') || providerStr.includes('[object Proxy]');
+          console.log('Is Proxy?', isProxy);
+          
+          // Try to inspect Proxy target if it's a Proxy
+          if (isProxy) {
+            try {
+              // Try to get the target through various possible properties
+              const target = (provider as any).target || (provider as any)._target || (provider as any).__target;
+              if (target) {
+                console.log('Proxy target:', target);
+                console.log('Target constructor:', target.constructor?.name);
+                console.log('Target keys:', Object.keys(target).slice(0, 10));
+              } else {
+                console.log('Could not access Proxy target (may be protected)');
+              }
+            } catch (e) {
+              console.log('Could not inspect Proxy target:', e);
+            }
+          }
+          
+          // Check if this provider has any Zerion-related properties
+          try {
+            const allProps = Object.getOwnPropertyNames(provider);
+            const zerionProps = allProps.filter(p => p.toLowerCase().includes('zerion'));
+            if (zerionProps.length > 0) {
+              console.log('✅ Found Zerion-related properties:', zerionProps);
+            } else {
+              // Check which wallet this actually is
+              const isMetaMask = (provider as any).isMetaMask;
+              const isRabby = (provider as any).isRabby;
+              const isCoinbase = (provider as any).isCoinbaseWallet;
+              
+              if (isMetaMask) {
+                console.log('⚠️ This provider is MetaMask, not Zerion.');
+              } else if (isRabby) {
+                console.log('⚠️ This provider is Rabby, not Zerion.');
+              } else if (isCoinbase) {
+                console.log('⚠️ This provider is Coinbase Wallet, not Zerion.');
+              } else {
+                console.log('⚠️ No Zerion-related properties found. This provider might be MetaMask or another wallet.');
+              }
+              console.log('💡 Tip: If Zerion is installed, you may need to make it the primary wallet in your browser settings.');
+            }
+          } catch (e) {
+            console.log('Could not inspect provider properties:', e);
+          }
+        }
+      } else {
+        provider =
+          walletProviders[walletName] ??
+          walletProviders["Ethereum Wallet"] ??
+          (window as any).ethereum;
+      }
+
+      if (!provider || typeof provider.request !== "function") {
+        if (walletName === "Zerion") {
+          // For Zerion, try one more time with window.ethereum as fallback
+          console.log('⚠️ Zerion provider not found, trying window.ethereum as fallback...');
+          provider = (window as any).ethereum;
+          if (provider && typeof provider.request === "function") {
+            console.log('✅ Using window.ethereum as Zerion provider');
+          } else {
+            console.error('❌ Zerion provider not available');
+          }
+        }
+        
+        if (!provider || typeof provider.request !== "function") {
+          if (isMobile) {
+            // On mobile, guide user to open in wallet browser
+            const walletLinks: Record<string, string> = {
+              "MetaMask": "https://metamask.app.link/dapp/" + window.location.href.replace(/^https?:\/\//, ''),
+              "Coinbase Wallet": "https://go.cb-w.com/dapp?cb_url=" + encodeURIComponent(window.location.href),
+              "Trust Wallet": "https://link.trustwallet.com/open_url?coin_id=60&url=" + encodeURIComponent(window.location.href),
+              "Zerion": "https://wallet.zerion.io/wc?uri=" + encodeURIComponent(window.location.href),
+            };
+            
+            const deepLink = walletLinks[walletName];
+            if (deepLink) {
+              toast({
+                title: `Open in ${walletName}`,
+                description: `Opening ${walletName} app...`,
+              });
+              window.location.href = deepLink;
+              return;
+            }
+          }
+          
+          throw new Error(`${walletName} not detected. ${isMobile ? 'Please open this page in your wallet browser or install ' + walletName : 'Please install the browser extension.'}`);
+        }
       }
 
       accounts = await provider.request({
         method: "eth_requestAccounts",
+      });
+      
+      console.log('Accounts received:', accounts);
+      
+      if (accounts.length > 0) {
+        // Store both the wallet address and name
+        const walletAddress = accounts[0];
+        setConnectedWallet(walletAddress);
+        setConnectedWalletName(walletName);
+        setShowWalletModal(false);
+        toast({
+          title: "Wallet Connected",
+          description: `Successfully connected to ${walletName}`,
         });
-        
-        console.log('Accounts received:', accounts);
-        
-        if (accounts.length > 0) {
-          // Store both the wallet address and name
-          const walletAddress = accounts[0];
-          setConnectedWallet(walletAddress);
-          setConnectedWalletName(walletName);
-          setShowWalletModal(false);
-          toast({
-            title: "Wallet Connected",
-            description: `Successfully connected to ${walletName}`,
-          });
-        } else {
-          toast({
-            title: "No Accounts",
-            description: "No accounts found in the wallet",
+      } else {
+        toast({
+          title: "No Accounts",
+          description: "No accounts found in the wallet",
           variant: "destructive",
         });
       }
@@ -872,10 +1098,19 @@ const Index = () => {
       { name: 'Phantom', icon: '👻', color: 'bg-purple-500' },
       { name: 'Backpack', icon: '🎒', color: 'bg-red-500' },
       { name: 'Coinbase Wallet', icon: 'C', color: 'bg-blue-600' },
+      { name: 'Zerion', icon: 'Z', color: 'bg-indigo-600' },
     ];
     
+    // Always include Zerion in the list (even if not auto-detected)
+    // Zerion extension might not expose itself until user interaction
     const installedWallets = walletConfigs
-      .filter(wallet => detectedWallets.includes(wallet.name))
+      .filter(wallet => {
+        if (wallet.name === 'Zerion') {
+          // Always show Zerion - let user try to connect (will work if extension is installed)
+          return true;
+        }
+        return detectedWallets.includes(wallet.name);
+      })
       .map(wallet => ({ ...wallet, available: true }));
 
     // On mobile, show MetaMask even if not detected (will use deep link)
