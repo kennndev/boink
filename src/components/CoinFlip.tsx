@@ -773,6 +773,66 @@ export const CoinFlip = ({ connectedWallet, connectedWalletName, walletProviders
       // Function signature: placeBetWithPermit(uint8 guess, uint256 amount, uint256 seed, uint256 deadline, uint8 v, bytes32 r, bytes32 s)
       const gasLimit = 300000n;
       
+      // Validate permit parameters before sending
+      const currentTimestamp = Math.floor(Date.now() / 1000);
+      if (deadline <= currentTimestamp) {
+        throw new Error(`Permit deadline has expired. Deadline: ${deadline}, Current: ${currentTimestamp}`);
+      }
+      
+      console.log("🔍 Validating permit parameters...");
+      console.log("   Owner:", ownerAddress);
+      console.log("   Spender:", CONTRACT_ADDRESS);
+      console.log("   Amount:", amountUnits.toString());
+      console.log("   Nonce:", nonce.toString());
+      console.log("   Deadline:", deadline, `(${Math.floor((deadline - currentTimestamp) / 60)} minutes from now)`);
+      console.log("   Signature v:", v, "r:", r.slice(0, 10) + "...", "s:", s.slice(0, 10) + "...");
+      
+      // First, try to simulate the transaction to get revert reason if it fails
+      try {
+        console.log("🔍 Simulating transaction to check for revert reasons...");
+        await (contractWithSigner as any).placeBetWithPermit.staticCall(
+          guess,
+          amountUnits,
+          userSeed,
+          deadline,
+          v,
+          r,
+          s
+        );
+        console.log("✅ Simulation successful - transaction should work");
+      } catch (simError: any) {
+        console.error("❌ Transaction simulation failed!");
+        console.error("   Error:", simError);
+        if (simError.reason) {
+          console.error("   Revert reason:", simError.reason);
+        }
+        if (simError.data) {
+          console.error("   Error data:", simError.data);
+          // Try to decode the error
+          try {
+            const decoded = contractWithSigner.interface.parseError(simError.data);
+            console.error("   Decoded error:", decoded);
+          } catch (decodeErr) {
+            console.error("   Could not decode error data");
+          }
+        }
+        
+        // Check for common permit errors
+        const errorMsg = simError.reason || simError.message || 'Unknown error';
+        if (errorMsg.includes('permit') || errorMsg.includes('signature') || errorMsg.includes('invalid')) {
+          throw new Error(`Permit signature is invalid. Possible causes:
+1. Wrong domain version (detected: "${domain.version}")
+2. Wrong nonce (used: ${nonce.toString()})
+3. Expired deadline (deadline: ${deadline}, current: ${currentTimestamp})
+4. Invalid signature (v=${v}, r=${r.slice(0, 10)}..., s=${s.slice(0, 10)}...)
+
+Check console for full error details.`);
+        }
+        
+        // Still throw the original error with more context
+        throw new Error(`Transaction would revert: ${errorMsg}. Check console for details.`);
+      }
+      
       const placeBetTx = await (contractWithSigner as any).placeBetWithPermit(
         guess,
         amountUnits,
