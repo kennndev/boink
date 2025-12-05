@@ -8,7 +8,9 @@ const __dirname = dirname(__filename);
 
 // Load ABI from src directory
 const ABI_PATH = join(__dirname, '..', '..', 'src', 'coinFlip.json');
+const REFERRAL_ABI_PATH = join(__dirname, '..', '..', 'src', 'ReferralRegistry.json');
 let coinFlipABI = null;
+let referralRegistryABI = null;
 
 try {
   const abiContent = readFileSync(ABI_PATH, 'utf-8');
@@ -16,6 +18,14 @@ try {
 } catch (error) {
   console.error('Error loading CoinFlip ABI:', error);
   throw new Error('Failed to load CoinFlip ABI');
+}
+
+try {
+  const referralAbiContent = readFileSync(REFERRAL_ABI_PATH, 'utf-8');
+  referralRegistryABI = JSON.parse(referralAbiContent);
+} catch (error) {
+  console.error('Error loading ReferralRegistry ABI:', error);
+  // Don't throw, referral registry is optional
 }
 
 /**
@@ -53,5 +63,27 @@ export function getERC20Contract(tokenAddress, provider) {
   return new ethers.Contract(tokenAddress, erc20Abi, provider);
 }
 
-export { coinFlipABI };
+/**
+ * Get referral registry contract instance
+ */
+export function getReferralRegistryInstance() {
+  const RPC_URL = process.env.RPC_URL;
+  const REFERRAL_REGISTRY_ADDRESS = process.env.REFERRAL_REGISTRY_ADDRESS || process.env.VITE_REFERRAL_REGISTORY_ADDRESS || "0x6C02bb7536d71a69F3d38E448422C80445D26b0d";
+  const CHAIN_ID = Number(process.env.CHAIN_ID || process.env.VITE_CHAIN_ID || 763373);
+
+  if (!RPC_URL) {
+    throw new Error('Missing required environment variable: RPC_URL');
+  }
+
+  if (!referralRegistryABI) {
+    throw new Error('ReferralRegistry ABI not loaded');
+  }
+
+  const provider = new ethers.JsonRpcProvider(RPC_URL, CHAIN_ID);
+  const contract = new ethers.Contract(REFERRAL_REGISTRY_ADDRESS, referralRegistryABI, provider);
+
+  return { contract, provider };
+}
+
+export { coinFlipABI, referralRegistryABI };
 
