@@ -2,7 +2,7 @@ import express from 'express';
 import { ethers } from 'ethers';
 import { User } from '../models/User.js';
 import { getTwitterOAuthUrl, verifyFollowAfterOAuth } from '../utils/twitterVerification.js';
-import { getContractInstance, getERC20Contract } from '../utils/contractHelper.js';
+import { getContractInstance, getERC20Contract, getReferralRegistryInstance } from '../utils/contractHelper.js';
 
 const router = express.Router();
 
@@ -74,7 +74,7 @@ router.get('/twitter-callback', async (req, res) => {
     }
 
     // User is following, award points
-    const POINTS_PER_TWITTER_FOLLOW = 10;
+    const POINTS_PER_TWITTER_FOLLOW = 50;
 
     // Check if user already followed (prevent duplicate rewards for this wallet)
     if (user.twitterFollowed) {
@@ -176,6 +176,7 @@ router.post('/:walletAddress/flip', async (req, res) => {
     const { walletAddress } = req.params;
     const normalizedAddress = walletAddress.toLowerCase().trim();
     const POINTS_PER_FLIP = 100;
+    const POINTS_FOR_FIRST_FLIP = 0; // First flip gets 0 points
 
     let user = await User.findOne({ walletAddress: normalizedAddress });
 
@@ -187,16 +188,23 @@ router.post('/:walletAddress/flip', async (req, res) => {
       });
     }
 
+    // Check if this is the first flip
+    const isFirstFlip = user.flips === 0;
+    const pointsToAward = isFirstFlip ? POINTS_FOR_FIRST_FLIP : POINTS_PER_FLIP;
+
     // Award points and increment flip count
-    user.points += POINTS_PER_FLIP;
+    user.points += pointsToAward;
     user.flips += 1;
     await user.save();
 
     res.json({
       success: true,
-      message: `Awarded ${POINTS_PER_FLIP} points for coin flip`,
+      message: isFirstFlip 
+        ? `First flip completed. No points awarded for first flip.`
+        : `Awarded ${POINTS_PER_FLIP} points for coin flip`,
       points: user.points,
-      pointsAwarded: POINTS_PER_FLIP
+      pointsAwarded: pointsToAward,
+      isFirstFlip: isFirstFlip
     });
   } catch (error) {
     console.error('Error awarding flip points:', error);
@@ -334,7 +342,7 @@ router.post('/:walletAddress/twitter-follow', async (req, res) => {
   try {
     const { walletAddress } = req.params;
     const normalizedAddress = walletAddress.toLowerCase().trim();
-    const POINTS_PER_TWITTER_FOLLOW = 10;
+    const POINTS_PER_TWITTER_FOLLOW = 50;
 
     // Check if Twitter API is configured
     const twitterConfigured = process.env.TWITTER_CLIENT_ID && process.env.TWITTER_CLIENT_SECRET;
@@ -342,7 +350,7 @@ router.post('/:walletAddress/twitter-follow', async (req, res) => {
     if (twitterConfigured) {
       return res.json({
         success: false,
-        message: 'Twitter OAuth verification is required. Please use the "Verify & Claim 10 Points" button.',
+        message: 'Twitter OAuth verification is required. Please use the "Verify & Claim 50 Points" button.',
         requiresOAuth: true
       });
     }
@@ -388,15 +396,16 @@ router.post('/:walletAddress/twitter-follow', async (req, res) => {
   }
 });
 
-// Award points for referral
+// Award points for referral - referrer gets 20 points when someone uses their code
 router.post('/:walletAddress/referral', async (req, res) => {
   try {
     const { walletAddress } = req.params;
     const normalizedAddress = walletAddress.toLowerCase().trim();
-    const POINTS_PER_REFERRAL = 5;
+    const POINTS_FOR_NEW_USER = 0; // New user gets 0 points
+    const POINTS_FOR_REFERRER = 20; // Referrer gets 20 points for each new referral
 
+    // Check if user already used referral (prevent duplicate rewards)
     let user = await User.findOne({ walletAddress: normalizedAddress });
-
     if (!user) {
       user = new User({
         walletAddress: normalizedAddress,
@@ -404,7 +413,6 @@ router.post('/:walletAddress/referral', async (req, res) => {
       });
     }
 
-    // Check if user already used referral (prevent duplicate rewards)
     if (user.referralUsed) {
       return res.json({
         success: false,
@@ -413,16 +421,53 @@ router.post('/:walletAddress/referral', async (req, res) => {
       });
     }
 
-    // Award points and mark as used
-    user.points += POINTS_PER_REFERRAL;
+    // Get referrer address from the contract
+    let referrerAddress = null;
+    try {
+      const { contract } = getReferralRegistryInstance();
+      referrerAddress = await contract.referrerOf(normalizedAddress);
+      
+      // Check if referrer is valid (not zero address)
+      if (referrerAddress && referrerAddress !== ethers.ZeroAddress) {
+        referrerAddress = referrerAddress.toLowerCase().trim();
+        
+        // Prevent self-referral
+        if (normalizedAddress === referrerAddress) {
+          referrerAddress = null;
+        } else {
+          // Award 20 points to the referrer
+          let referrer = await User.findOne({ walletAddress: referrerAddress });
+          if (!referrer) {
+            referrer = new User({
+              walletAddress: referrerAddress,
+              points: 0
+            });
+          }
+          
+          referrer.points += POINTS_FOR_REFERRER;
+          await referrer.save();
+          
+          console.log(`Awarded ${POINTS_FOR_REFERRER} points to referrer ${referrerAddress}. New total: ${referrer.points}`);
+        }
+      }
+    } catch (referralError) {
+      console.error('Error getting referrer from contract:', referralError);
+      // Continue even if we can't get referrer - still mark user as having used referral
+    }
+
+    // Award 0 points to new user and mark as used
+    user.points += POINTS_FOR_NEW_USER;
     user.referralUsed = true;
     await user.save();
 
     res.json({
       success: true,
-      message: `Awarded ${POINTS_PER_REFERRAL} points for referral`,
+      message: referrerAddress 
+        ? `Referral applied. Referrer earned ${POINTS_FOR_REFERRER} points.`
+        : `Referral applied.`,
       points: user.points,
-      pointsAwarded: POINTS_PER_REFERRAL
+      pointsAwarded: POINTS_FOR_NEW_USER,
+      referrerAwarded: referrerAddress ? POINTS_FOR_REFERRER : 0
     });
   } catch (error) {
     console.error('Error awarding referral points:', error);
