@@ -296,7 +296,8 @@ export const Referral = ({
         description: "Waiting for confirmation...",
       });
 
-      const receipt = await tx.wait();
+      // OPTIMIZED: Wait for only 1 confirmation (faster)
+      const receipt = await tx.wait(1);
       console.log("Transaction confirmed in block:", receipt.blockNumber);
 
       // Try to get the code from the transaction receipt logs first (most reliable)
@@ -497,7 +498,8 @@ export const Referral = ({
         description: "Waiting for confirmation...",
       });
 
-      await tx.wait();
+      // OPTIMIZED: Wait for only 1 confirmation (faster)
+      await tx.wait(1);
 
       setHasUsedCode(true);
       setManualCode("");
@@ -508,15 +510,15 @@ export const Referral = ({
         setReferrer(referrerAddress);
       }
 
-      // Award points for referral
-      if (address) {
+      // Award points to referrer (not the user using the code)
+      if (address && referrerAddress && referrerAddress !== ethers.ZeroAddress) {
         try {
-          const pointsResult = await awardReferralPoints(address);
+          const pointsResult = await awardReferralPoints(address, referrerAddress);
           if (pointsResult.success && pointsResult.points !== undefined) {
-            setUserPoints(pointsResult.points);
+            // Points were awarded to the referrer, not the current user
             toast({
-              title: "🎉 Points Awarded!",
-              description: `You earned ${pointsResult.pointsAwarded} points for using a referral code! Total: ${pointsResult.points} points`,
+              title: "🎉 Referral Applied!",
+              description: `The referrer earned ${pointsResult.pointsAwarded} points for your signup!`,
             });
           } else if (pointsResult.message) {
             // Points already awarded
@@ -611,7 +613,7 @@ export const Referral = ({
             toast({
               variant: "destructive",
               title: "OAuth Required",
-              description: "Please click 'Verify & Claim 10 Points' to authenticate with Twitter.",
+              description: "Please click 'Verify & Claim 50 Points' to authenticate with Twitter.",
             });
           } else {
             toast({
@@ -791,7 +793,7 @@ export const Referral = ({
               🐦 Follow on Twitter
             </h3>
             <p className="text-xs sm:text-xs font-retro text-muted-foreground mb-2 leading-relaxed">
-              Follow us on Twitter and earn 10 points!
+              Follow us on Twitter and earn 50 points!
             </p>
             {twitterFollowed && twitterUserId ? (
               <div className="p-3 sm:p-2 bg-green-100 win98-border">
@@ -812,7 +814,7 @@ export const Referral = ({
                   disabled={isClaimingTwitter}
                   className="w-full font-pixel text-sm sm:text-sm h-12 sm:h-9 touch-manipulation"
                 >
-                  {isClaimingTwitter ? "Verifying..." : "Verify & Claim 10 Points"}
+                  {isClaimingTwitter ? "Verifying..." : "Verify & Claim 50 Points"}
                 </Button>
               </div>
             )}
