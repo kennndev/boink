@@ -235,7 +235,6 @@ const Index = () => {
         setConnectedWalletName(null);
         localStorage.removeItem('coinflip_connectedWallet');
         localStorage.removeItem('coinflip_connectedWalletName');
-        console.log('Wallet disconnected or account changed');
       }
     };
 
@@ -325,7 +324,6 @@ const Index = () => {
         // Check window.zerion directly
         const zerionDirect = extendedWindow.zerion || (window as any).zerion;
         if (zerionDirect) {
-          console.log('✅ Found Zerion in window.zerion:', zerionDirect);
         }
         
         // Check if Zerion is in window.ethereum.providers but not detected
@@ -345,11 +343,6 @@ const Index = () => {
         
         // Debug: Log all providers if Zerion not found
         if (!zerionInProviders && !zerionDirect) {
-          console.log('🔍 Zerion not found. Checking all providers...');
-          console.log('Provider candidates count:', providerCandidates.length);
-          console.log('window.ethereum:', (window as any).ethereum);
-          console.log('window.ethereum.providers:', (window as any).ethereum?.providers);
-          console.log('window.zerion:', (window as any).zerion);
           
           providerCandidates.forEach((p: any, i: number) => {
             const allKeys = Object.keys(p || {});
@@ -358,19 +351,7 @@ const Index = () => {
               k.toLowerCase().includes('wallet')
             );
             const stringValues = Object.values(p || {}).filter(v => typeof v === 'string').slice(0, 5);
-            
-            console.log(`Provider ${i}:`, {
-              constructor: p?.constructor?.name,
-              hasRequest: typeof p?.request === 'function',
-              isMetaMask: p?.isMetaMask,
-              isCoinbaseWallet: p?.isCoinbaseWallet,
-              isRabby: p?.isRabby,
-              isPhantom: p?.isPhantom,
-              isBackpack: p?.isBackpack,
-              zerionRelatedKeys: zerionRelatedKeys.length > 0 ? zerionRelatedKeys : 'none',
-              stringValues: stringValues,
-              allKeys: allKeys.slice(0, 20),
-            });
+        
           });
         }
         
@@ -468,11 +449,8 @@ const Index = () => {
   };
 
   const handleWalletConnect = async (walletName: string) => {
-    console.log('=== WALLET CONNECT CLICKED ===');
-    console.log('Wallet name:', walletName);
-    
+     
     try {
-      console.log('Attempting to connect to:', walletName);
       
       let accounts: string[] = [];
 
@@ -510,7 +488,6 @@ const Index = () => {
 
           // Trigger QR modal and connect
           const wcAccounts = await wcProvider.enable();
-          console.log("WalletConnect accounts:", wcAccounts);
 
           setWalletProviders({ ...walletProviders, WalletConnect: wcProvider as unknown as EthereumProvider });
           // Store both the wallet address and name
@@ -530,7 +507,6 @@ const Index = () => {
             });
           }
         } catch (wcError: any) {
-          console.error("WalletConnect error:", wcError);
           toast({
             variant: "destructive",
             title: "WalletConnect Failed",
@@ -543,12 +519,7 @@ const Index = () => {
       // Special handling for Zerion - try multiple ways to access it
       let provider: EthereumProvider | undefined;
       if (walletName === "Zerion") {
-        console.log('🔍 Attempting to connect to Zerion...');
-        console.log('Checking walletProviders["Zerion"]:', walletProviders["Zerion"]);
-        console.log('Checking window.zerion:', (window as any).zerion);
-        console.log('Checking window.ethereum:', (window as any).ethereum);
-        console.log('Checking window.ethereum.providers:', (window as any).ethereum?.providers);
-        
+           
         // Try to find Zerion in multiple ways
         provider = walletProviders["Zerion"] 
           ?? (window as any).zerion
@@ -574,10 +545,8 @@ const Index = () => {
              JSON.stringify(ethereumProvider._state || {}).toLowerCase().includes('zerion'));
           
           if (mightBeZerion) {
-            console.log('✅ window.ethereum appears to be Zerion');
             provider = ethereumProvider;
           } else {
-            console.log('⚠️ window.ethereum is not Zerion, but will use it as fallback');
             // Still use it as fallback - Zerion might work through window.ethereum
             provider = ethereumProvider;
           }
@@ -588,15 +557,11 @@ const Index = () => {
           provider = walletProviders["Ethereum Wallet"] ?? (window as any).ethereum;
         }
           
-        console.log('Selected Zerion provider:', provider);
         if (provider) {
-          console.log('Provider type:', provider.constructor?.name);
-          console.log('Provider keys (first 15):', Object.keys(provider).slice(0, 15));
-          
+             
           // Check if it's a Proxy by checking the string representation (safer than instanceof)
           const providerStr = String(provider);
           const isProxy = providerStr.includes('Proxy') || providerStr.includes('[object Proxy]');
-          console.log('Is Proxy?', isProxy);
           
           // Try to inspect Proxy target if it's a Proxy
           if (isProxy) {
@@ -604,10 +569,7 @@ const Index = () => {
               // Try to get the target through various possible properties
               const target = (provider as any).target || (provider as any)._target || (provider as any).__target;
               if (target) {
-                console.log('Proxy target:', target);
-                console.log('Target constructor:', target.constructor?.name);
-                console.log('Target keys:', Object.keys(target).slice(0, 10));
-              } else {
+                         } else {
                 console.log('Could not access Proxy target (may be protected)');
               }
             } catch (e) {
@@ -652,7 +614,6 @@ const Index = () => {
       if (!provider || typeof provider.request !== "function") {
         if (walletName === "Zerion") {
           // For Zerion, try one more time with window.ethereum as fallback
-          console.log('⚠️ Zerion provider not found, trying window.ethereum as fallback...');
           provider = (window as any).ethereum;
           if (provider && typeof provider.request === "function") {
             console.log('✅ Using window.ethereum as Zerion provider');
@@ -690,7 +651,6 @@ const Index = () => {
         method: "eth_requestAccounts",
       });
       
-      console.log('Accounts received:', accounts);
       
       if (accounts.length > 0) {
         // Store both the wallet address and name
@@ -863,7 +823,6 @@ const Index = () => {
                 alt="Project Roadmap" 
                 className="w-full h-auto max-h-[400px] object-contain"
                 onError={(e) => {
-                  console.error('Failed to load roadmap image:', e);
                   e.currentTarget.style.display = 'none';
                 }}
               />
@@ -1185,7 +1144,6 @@ const Index = () => {
                   className="w-full h-auto max-h-[300px] object-contain cursor-pointer"
                   onClick={() => setShowImageModal({ src: "/ROADMAP.png", alt: "Project Roadmap" })}
                   onError={(e) => {
-                    console.error('Failed to load roadmap image:', e);
                     e.currentTarget.style.display = 'none';
                   }}
                 />
@@ -1238,7 +1196,6 @@ const Index = () => {
   };
 
   const renderWalletModal = () => {
-    console.log('Rendering wallet modal with detected wallets:', detectedWallets);
     
     const isMobile = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent);
     
