@@ -1631,8 +1631,6 @@ const Index = () => {
       {showStartMenu && (
         <StartMenu
           connectedWallet={connectedWallet}
-          connectedWalletName={connectedWalletName}
-          walletProviders={walletProviders}
           onClose={() => setShowStartMenu(false)}
           isOpen={showStartMenu}
         />
