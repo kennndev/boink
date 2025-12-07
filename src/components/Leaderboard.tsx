@@ -1,10 +1,12 @@
 import { useState, useEffect } from "react";
 import { ethers } from "ethers";
 import coinFlipArtifact from "../coinFlip.json";
+import referralRegistryArtifact from "../ReferralRegistry.json";
 import { getLeaderboard } from "../lib/api";
 
 // Type assertion for ABI - the JSON file is an array of ABI items
 const coinFlipABI = coinFlipArtifact as any;
+const referralRegistryABI = referralRegistryArtifact as any;
 
 interface LeaderboardProps {
   connectedWallet: string | null;
@@ -21,15 +23,26 @@ interface PlayerStats {
   winRate: number;
 }
 
+interface ReferralStats {
+  address: string;
+  totalReferrals: number;
+  code: string;
+  active: boolean;
+}
+
 export const Leaderboard = ({ connectedWallet, connectedWalletName, walletProviders }: LeaderboardProps) => {
+  const [activeTab, setActiveTab] = useState<"onchain" | "referrals">("onchain");
   const [players, setPlayers] = useState<PlayerStats[]>([]);
+  const [referrals, setReferrals] = useState<ReferralStats[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [sortBy, setSortBy] = useState<"wins" | "plays" | "winRate">("wins");
   const [contract, setContract] = useState<ethers.Contract | null>(null);
+  const [referralContract, setReferralContract] = useState<ethers.Contract | null>(null);
   const [provider, setProvider] = useState<ethers.BrowserProvider | null>(null);
 
   const CONTRACT_ADDRESS = import.meta.env.VITE_COINFLIP_CONTRACT_ADDRESS || "";
+  const REFERRAL_REGISTRY_ADDRESS = import.meta.env.VITE_REFERRAL_REGISTORY_ADDRESS || "";
   const EXPECTED_CHAIN_ID = import.meta.env.VITE_CHAIN_ID || "763373";
 
   useEffect(() => {
@@ -58,7 +71,7 @@ export const Leaderboard = ({ connectedWallet, connectedWalletName, walletProvid
             return;
           }
 
-          // Create contract instance
+          // Create contract instances
           const coinFlipContract = new ethers.Contract(
             CONTRACT_ADDRESS,
             coinFlipABI,
@@ -66,8 +79,20 @@ export const Leaderboard = ({ connectedWallet, connectedWalletName, walletProvid
           );
           setContract(coinFlipContract);
 
-          // Load leaderboard data
-          await loadLeaderboard(coinFlipContract, browserProvider);
+          // Create referral registry contract instance
+          const referralRegContract = new ethers.Contract(
+            REFERRAL_REGISTRY_ADDRESS,
+            referralRegistryABI,
+            browserProvider
+          );
+          setReferralContract(referralRegContract);
+
+          // Load leaderboard data based on active tab
+          if (activeTab === "onchain") {
+            await loadLeaderboard(coinFlipContract, browserProvider);
+          } else {
+            await loadReferralLeaderboard(referralRegContract, browserProvider);
+          }
         } catch (e: any) {
           console.error("Leaderboard setup error:", e);
           setError(e?.message || "Failed to setup leaderboard");
@@ -77,7 +102,18 @@ export const Leaderboard = ({ connectedWallet, connectedWalletName, walletProvid
     } else {
       setLoading(false);
     }
-  }, [connectedWallet, walletProviders, CONTRACT_ADDRESS]);
+  }, [connectedWallet, walletProviders, CONTRACT_ADDRESS, activeTab]);
+
+  // Reload when tab changes
+  useEffect(() => {
+    if (!provider) return;
+    
+    if (activeTab === "onchain" && contract) {
+      loadLeaderboard(contract, provider);
+    } else if (activeTab === "referrals" && referralContract) {
+      loadReferralLeaderboard(referralContract, provider);
+    }
+  }, [activeTab, contract, referralContract, provider]);
 
   // Re-sort when sortBy changes
   useEffect(() => {
@@ -285,6 +321,139 @@ export const Leaderboard = ({ connectedWallet, connectedWalletName, walletProvid
     }
   };
 
+  const loadReferralLeaderboard = async (contract: ethers.Contract, provider: ethers.BrowserProvider) => {
+    try {
+      setLoading(true);
+      setError(null);
+      console.log("📊 Loading referral leaderboard...");
+
+      // Query ReferralUsed events to get all unique referrer addresses
+      const filter = contract.filters.ReferralUsed();
+      
+      // Get current block number
+      const currentBlock = await provider.getBlockNumber();
+      const MAX_BLOCK_RANGE = 100000;
+      const fromBlock = Math.max(0, currentBlock - MAX_BLOCK_RANGE);
+      
+      // Helper function to query events in chunks
+      const queryEventsInChunks = async (eventFilter: any, startBlock: number, endBlock: number): Promise<any[]> => {
+        const allEvents: any[] = [];
+        let currentStart = startBlock;
+        
+        while (currentStart <= endBlock) {
+          const currentEnd = Math.min(currentStart + MAX_BLOCK_RANGE - 1, endBlock);
+          
+          try {
+            const chunkEvents = await contract.queryFilter(eventFilter, currentStart, currentEnd);
+            allEvents.push(...chunkEvents);
+          } catch (chunkError: any) {
+            console.warn(`⚠️ Error querying chunk ${currentStart}-${currentEnd}:`, chunkError.message);
+          }
+          
+          currentStart = currentEnd + 1;
+          if (currentStart <= endBlock) {
+            await new Promise(resolve => setTimeout(resolve, 100));
+          }
+        }
+        
+        return allEvents;
+      };
+      
+      let events: any[] = [];
+      try {
+        events = await queryEventsInChunks(filter, fromBlock, currentBlock);
+        console.log(`✅ Found ${events.length} ReferralUsed events`);
+      } catch (queryError: any) {
+        console.warn("⚠️ Error querying ReferralUsed events:", queryError);
+        events = [];
+      }
+
+      // Get unique referrer addresses from events
+      const uniqueReferrers = new Set<string>();
+      events.forEach((event: any) => {
+        try {
+          const parsed = contract.interface.parseLog(event);
+          if (parsed && parsed.args) {
+            // ReferralUsed event args: [referrer, referee, code]
+            const referrer = parsed.args.referrer || parsed.args[0];
+            if (referrer) {
+              uniqueReferrers.add(referrer.toString().toLowerCase());
+            }
+          }
+        } catch (e) {
+          if (event.args) {
+            const referrer = event.args.referrer || event.args[0];
+            if (referrer) {
+              uniqueReferrers.add(referrer.toString().toLowerCase());
+            }
+          }
+        }
+      });
+
+      console.log(`👥 Found ${uniqueReferrers.size} unique referrers from events`);
+
+      // Fallback: If no events found, try getting addresses from backend database
+      if (uniqueReferrers.size === 0) {
+        console.log("⚠️ No referrers found in events, trying backend database as fallback...");
+        try {
+          const backendLeaderboard = await getLeaderboard(100);
+          // Get all users who have referralUsed = true (they were referred by someone)
+          // We need to query the contract to find their referrers
+          for (const user of backendLeaderboard) {
+            try {
+              const referrerAddress = await contract.referrerOf(user.walletAddress);
+              if (referrerAddress && referrerAddress !== ethers.ZeroAddress) {
+                uniqueReferrers.add(referrerAddress.toString().toLowerCase());
+              }
+            } catch (e) {
+              // Skip if can't get referrer
+            }
+          }
+          console.log(`✅ Found ${uniqueReferrers.size} referrers from backend database`);
+        } catch (backendError) {
+          console.error("❌ Backend fallback also failed:", backendError);
+        }
+      }
+
+      if (uniqueReferrers.size === 0) {
+        console.log("⚠️ No referrers found");
+        setReferrals([]);
+        setLoading(false);
+        return;
+      }
+
+      // Fetch stats for each referrer
+      const referralStatsPromises = Array.from(uniqueReferrers).map(async (address) => {
+        try {
+          const [code, totalReferrals, active] = await contract.getReferrerStats(address);
+          return {
+            address,
+            totalReferrals: Number(totalReferrals ?? 0),
+            code: code !== ethers.ZeroHash ? ethers.hexlify(code).slice(0, 10) + "..." : "N/A",
+            active: active ?? false,
+          } as ReferralStats;
+        } catch (e) {
+          console.error(`Error fetching referral stats for ${address}:`, e);
+          return null;
+        }
+      });
+
+      const allStats = await Promise.all(referralStatsPromises);
+      const validStats = allStats.filter((stat): stat is ReferralStats => stat !== null && stat.totalReferrals > 0);
+      console.log(`✅ Loaded stats for ${validStats.length} referrers`);
+
+      // Sort by totalReferrals (descending)
+      const sorted = [...validStats].sort((a, b) => b.totalReferrals - a.totalReferrals);
+
+      setReferrals(sorted);
+    } catch (e: any) {
+      console.error("❌ Error loading referral leaderboard:", e);
+      setError(e?.message || "Failed to load referral leaderboard");
+    } finally {
+      setLoading(false);
+    }
+  };
+
   const formatAddress = (address: string) => {
     return `${address.slice(0, 6)}...${address.slice(-4)}`;
   };
@@ -297,15 +466,42 @@ export const Leaderboard = ({ connectedWallet, connectedWalletName, walletProvid
     <div className="space-y-2 sm:space-y-4">
       <div className="text-center">
         <h2 className="text-lg sm:text-2xl font-bold font-pixel text-gradient-cyan mb-1 sm:mb-2">
-          🏆 ONCHAIN LEADERBOARD 🏆
+          🏆 LEADERBOARD 🏆
         </h2>
         <p className="text-xs sm:text-sm font-retro text-muted-foreground">
-          Top players ranked by their performance
+          {activeTab === "onchain" ? "Top players ranked by their performance" : "Top referrers ranked by total referrals"}
         </p>
       </div>
 
-      {/* Sort Options */}
+      {/* Tabs */}
       <div className="win98-border-inset p-2 sm:p-3 bg-secondary">
+        <div className="flex gap-2">
+          <button
+            className={`win98-border px-3 sm:px-4 py-1.5 sm:py-2 text-xs sm:text-sm font-pixel flex-1 ${
+              activeTab === "onchain"
+                ? "bg-blue-500 text-white font-bold"
+                : "bg-gray-200 text-gray-800 hover:bg-gray-300"
+            }`}
+            onClick={() => setActiveTab("onchain")}
+          >
+            🎮 Onchain Stats
+          </button>
+          <button
+            className={`win98-border px-3 sm:px-4 py-1.5 sm:py-2 text-xs sm:text-sm font-pixel flex-1 ${
+              activeTab === "referrals"
+                ? "bg-blue-500 text-white font-bold"
+                : "bg-gray-200 text-gray-800 hover:bg-gray-300"
+            }`}
+            onClick={() => setActiveTab("referrals")}
+          >
+            🔗 Referrals
+          </button>
+        </div>
+      </div>
+
+      {/* Sort Options - Only show for onchain tab */}
+      {activeTab === "onchain" && (
+        <div className="win98-border-inset p-2 sm:p-3 bg-secondary">
         <div className="text-xs sm:text-sm font-retro text-gray-700 mb-1 sm:mb-2">Sort By:</div>
         <div className="grid grid-cols-2 sm:flex sm:flex-wrap gap-1.5 sm:gap-2">
           {[
@@ -327,6 +523,7 @@ export const Leaderboard = ({ connectedWallet, connectedWalletName, walletProvid
           ))}
         </div>
       </div>
+      )}
 
       {/* Error Display */}
       {error && (
@@ -340,6 +537,104 @@ export const Leaderboard = ({ connectedWallet, connectedWalletName, walletProvid
         <div className="win98-border-inset p-6 sm:p-8 bg-secondary text-center">
           <p className="text-sm sm:text-lg font-pixel text-gray-600">Loading leaderboard...</p>
         </div>
+      ) : activeTab === "referrals" ? (
+        // Referral Leaderboard
+        referrals.length === 0 ? (
+          <div className="win98-border-inset p-6 sm:p-8 bg-secondary text-center">
+            <p className="text-sm sm:text-lg font-pixel text-gray-600">No referrers found yet. Be the first!</p>
+          </div>
+        ) : (
+          <>
+            {/* Desktop Table View */}
+            <div className="hidden sm:block win98-border-inset p-2 sm:p-4 bg-secondary">
+              <div className="overflow-x-auto">
+                <table className="w-full table-fixed">
+                  <colgroup>
+                    <col className="w-16" />
+                    <col className="w-40" />
+                    <col className="w-32" />
+                    <col className="w-24" />
+                  </colgroup>
+                  <thead>
+                    <tr className="border-b-2 border-gray-400">
+                      <th className="text-left text-gray-600 p-2 font-pixel text-xs sm:text-sm">Rank</th>
+                      <th className="text-left text-gray-600 p-2 font-pixel text-xs sm:text-sm">Address</th>
+                      <th className="text-right text-gray-600 p-2 font-pixel text-xs sm:text-sm">Total Referrals</th>
+                      <th className="text-center text-gray-600 p-2 font-pixel text-xs sm:text-sm">Status</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {referrals.map((referral, index) => (
+                      <tr
+                        key={referral.address}
+                        className={`border-b border-gray-300 ${
+                          connectedWallet?.toLowerCase() === referral.address.toLowerCase()
+                            ? "bg-blue-100"
+                            : ""
+                        }`}
+                      >
+                        <td className="p-2 font-pixel text-xs sm:text-sm">
+                          {index === 0 ? "🥇" : index === 1 ? "🥈" : index === 2 ? "🥉" : `#${index + 1}`}
+                        </td>
+                        <td className="p-2 font-retro text-xs font-mono truncate text-gray-600">
+                          {formatAddress(referral.address)}
+                        </td>
+                        <td className="p-2 font-pixel text-xs sm:text-sm text-right text-green-600 font-bold">
+                          {referral.totalReferrals}
+                        </td>
+                        <td className="p-2 font-pixel text-xs sm:text-sm text-center">
+                          <span className={`px-2 py-1 rounded ${referral.active ? "bg-green-200 text-green-800" : "bg-gray-200 text-gray-600"}`}>
+                            {referral.active ? "Active" : "Inactive"}
+                          </span>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+
+            {/* Mobile Card View */}
+            <div className="sm:hidden space-y-2">
+              {referrals.map((referral, index) => (
+                <div
+                  key={referral.address}
+                  className={`win98-border-inset p-3 bg-secondary ${
+                    connectedWallet?.toLowerCase() === referral.address.toLowerCase()
+                      ? "bg-blue-100"
+                      : ""
+                  }`}
+                >
+                  <div className="flex items-center justify-between mb-2">
+                    <div className="flex items-center gap-2">
+                      <span className="font-pixel text-base">
+                        {index === 0 ? "🥇" : index === 1 ? "🥈" : index === 2 ? "🥉" : `#${index + 1}`}
+                      </span>
+                      <span className="font-retro text-xs font-mono text-gray-600">
+                        {formatAddress(referral.address)}
+                      </span>
+                    </div>
+                    {connectedWallet?.toLowerCase() === referral.address.toLowerCase() && (
+                      <span className="text-xs font-pixel text-blue-600">(You)</span>
+                    )}
+                  </div>
+                  <div className="grid grid-cols-2 gap-2 text-xs">
+                    <div className="flex justify-between">
+                      <span className="font-retro text-gray-600">Referrals:</span>
+                      <span className="font-pixel text-green-600 font-bold">{referral.totalReferrals}</span>
+                    </div>
+                    <div className="flex justify-between">
+                      <span className="font-retro text-gray-600">Status:</span>
+                      <span className={`font-pixel ${referral.active ? "text-green-600" : "text-gray-600"}`}>
+                        {referral.active ? "Active" : "Inactive"}
+                      </span>
+                    </div>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </>
+        )
       ) : players.length === 0 ? (
         <div className="win98-border-inset p-6 sm:p-8 bg-secondary text-center">
           <p className="text-sm sm:text-lg font-pixel text-gray-600">No players found yet. Be the first!</p>
