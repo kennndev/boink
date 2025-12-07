@@ -1,6 +1,7 @@
 import { useState, useEffect } from "react";
 import { ethers } from "ethers";
 import coinFlipArtifact from "../coinFlip.json";
+import { getLeaderboard } from "../lib/api";
 
 // Type assertion for ABI - the JSON file is an array of ABI items
 const coinFlipABI = coinFlipArtifact as any;
@@ -107,23 +108,43 @@ export const Leaderboard = ({ connectedWallet, connectedWalletName, walletProvid
       console.log("🔍 Creating event filter...");
       const filter = contract.filters.BetResolved();
       
-      // Get current block number and query from last 10000 blocks to avoid querying all history
+      // Get current block number and query from block 0 to get all history
       console.log("🔍 Getting current block number...");
       const currentBlock = await provider.getBlockNumber();
       console.log(`📦 Current block: ${currentBlock}`);
       
-      // Query from last 10000 blocks (or from block 0 if chain is shorter)
-      const fromBlock = Math.max(0, currentBlock - 10000);
-      console.log(`🔍 Querying events from block ${fromBlock} to ${currentBlock}...`);
+      // Query from block 0 to get all events (or use a reasonable starting block if chain is very long)
+      // For testnets, querying from 0 is usually fine. For mainnets, you might want to limit this.
+      const fromBlock = 0;
+      console.log(`🔍 Querying BetResolved events from block ${fromBlock} to ${currentBlock}...`);
       
-      // Add timeout to prevent hanging
+      // Add timeout to prevent hanging (increase timeout for larger queries)
       const queryPromise = contract.queryFilter(filter, fromBlock, currentBlock);
       const timeoutPromise = new Promise((_, reject) => 
-        setTimeout(() => reject(new Error("Query timeout after 30 seconds")), 30000)
+        setTimeout(() => reject(new Error("Query timeout after 60 seconds")), 60000)
       );
       
-      const events = await Promise.race([queryPromise, timeoutPromise]) as any[];
-      console.log(`✅ Found ${events.length} events`);
+      let events: any[] = [];
+      try {
+        events = await Promise.race([queryPromise, timeoutPromise]) as any[];
+        console.log(`✅ Found ${events.length} BetResolved events`);
+      } catch (queryError: any) {
+        console.warn("⚠️ Error querying BetResolved events, trying BetPlaced events instead:", queryError);
+        
+        // Fallback: Try BetPlaced events instead
+        try {
+          const betPlacedFilter = contract.filters.BetPlaced();
+          const betPlacedPromise = contract.queryFilter(betPlacedFilter, fromBlock, currentBlock);
+          const betPlacedTimeout = new Promise((_, reject) => 
+            setTimeout(() => reject(new Error("Query timeout")), 60000)
+          );
+          events = await Promise.race([betPlacedPromise, betPlacedTimeout]) as any[];
+          console.log(`✅ Found ${events.length} BetPlaced events (using as fallback)`);
+        } catch (fallbackError) {
+          console.error("❌ Both BetResolved and BetPlaced queries failed:", fallbackError);
+          throw new Error("Failed to query events from contract");
+        }
+      }
 
       // Get unique player addresses from events
       const uniqueAddresses = new Set<string>();
@@ -132,10 +153,11 @@ export const Leaderboard = ({ connectedWallet, connectedWalletName, walletProvid
           const parsed = contract.interface.parseLog(event);
           if (parsed && parsed.args) {
             // BetResolved event args: [betId, player, guess, outcome, won, amount, payout, profit]
+            // BetPlaced event args: [betId, player, guess, amount, clientSeed]
             // Try accessing by name first, then by index
             const player = parsed.args.player || parsed.args[1];
             if (player) {
-              uniqueAddresses.add(player.toString());
+              uniqueAddresses.add(player.toString().toLowerCase());
             }
           }
         } catch (e) {
@@ -143,16 +165,32 @@ export const Leaderboard = ({ connectedWallet, connectedWalletName, walletProvid
           if (event.args) {
             const player = event.args.player || event.args[1];
             if (player) {
-              uniqueAddresses.add(player.toString());
+              uniqueAddresses.add(player.toString().toLowerCase());
             }
           }
         }
       });
 
-      console.log(`👥 Found ${uniqueAddresses.size} unique players`);
+      console.log(`👥 Found ${uniqueAddresses.size} unique players from events`);
+
+      // Fallback: If no events found, try getting addresses from backend database
+      if (uniqueAddresses.size === 0) {
+        console.log("⚠️ No players found in events, trying backend database as fallback...");
+        try {
+          const backendLeaderboard = await getLeaderboard(100); // Get up to 100 users
+          backendLeaderboard.forEach((user) => {
+            if (user.walletAddress) {
+              uniqueAddresses.add(user.walletAddress.toLowerCase());
+            }
+          });
+          console.log(`✅ Found ${uniqueAddresses.size} players from backend database`);
+        } catch (backendError) {
+          console.error("❌ Backend fallback also failed:", backendError);
+        }
+      }
 
       if (uniqueAddresses.size === 0) {
-        console.log("⚠️ No players found in events");
+        console.log("⚠️ No players found in events or database");
         setPlayers([]);
         setLoading(false);
         return;
