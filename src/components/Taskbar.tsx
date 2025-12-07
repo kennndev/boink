@@ -9,11 +9,12 @@ import { useState, useEffect, useRef } from "react";
 interface TaskbarProps {
   onStartClick: () => void;
   onConnectWalletClick: () => void;
+  onDisconnectWallet?: () => void;
   connectedWallet: string | null;
   blockNumber: string;
 }
 
-export const Taskbar = ({ onStartClick, onConnectWalletClick, connectedWallet, blockNumber }: TaskbarProps) => {
+export const Taskbar = ({ onStartClick, onConnectWalletClick, onDisconnectWallet, connectedWallet, blockNumber }: TaskbarProps) => {
   const [showMobileMenu, setShowMobileMenu] = useState(false);
   const [currentTime, setCurrentTime] = useState(new Date());
   const menuRef = useRef<HTMLDivElement>(null);
@@ -64,19 +65,42 @@ export const Taskbar = ({ onStartClick, onConnectWalletClick, connectedWallet, b
         <span className="font-military text-xs sm:text-sm">Start</span>
       </Button>
 
-      {/* Connect Wallet */}
-      <Button
-        onClick={onConnectWalletClick}
-        variant="secondary"
-        className="h-8 sm:h-9 px-2 sm:px-3 win98-border hover:win98-border-inset flex items-center gap-1 sm:gap-2 font-bold shrink-0"
-      >
-        <img src={connectIcon} alt="Connect" className="w-4 h-4 sm:w-6 sm:h-6" />
-        <span className="font-cyber text-xs sm:text-sm max-w-[44vw] sm:max-w-none truncate">
-          {connectedWallet 
-            ? `Connected: ${connectedWallet.slice(0, 6)}...${connectedWallet.slice(-4)}` 
-            : "Connect Wallet"}
-        </span>
-      </Button>
+      {/* Connect/Disconnect Wallet */}
+      {connectedWallet ? (
+        <div className="flex items-center gap-1 shrink-0">
+          <Button
+            onClick={onConnectWalletClick}
+            variant="secondary"
+            className="h-8 sm:h-9 px-2 sm:px-3 win98-border hover:win98-border-inset flex items-center gap-1 sm:gap-2 font-bold shrink-0"
+          >
+            <img src={connectIcon} alt="Connected" className="w-4 h-4 sm:w-6 sm:h-6" />
+            <span className="font-cyber text-xs sm:text-sm max-w-[44vw] sm:max-w-none truncate">
+              Connected: {connectedWallet.slice(0, 6)}...{connectedWallet.slice(-4)}
+            </span>
+          </Button>
+          {onDisconnectWallet && (
+            <Button
+              onClick={onDisconnectWallet}
+              variant="secondary"
+              className="h-8 sm:h-9 px-2 sm:px-2 win98-border hover:win98-border-inset hover:bg-red-100 hover:border-red-400 flex items-center justify-center font-bold shrink-0"
+              title="Disconnect Wallet"
+            >
+              <span className="text-red-600 font-bold text-xs sm:text-sm">✕</span>
+            </Button>
+          )}
+        </div>
+      ) : (
+        <Button
+          onClick={onConnectWalletClick}
+          variant="secondary"
+          className="h-8 sm:h-9 px-2 sm:px-3 win98-border hover:win98-border-inset flex items-center gap-1 sm:gap-2 font-bold shrink-0"
+        >
+          <img src={connectIcon} alt="Connect" className="w-4 h-4 sm:w-6 sm:h-6" />
+          <span className="font-cyber text-xs sm:text-sm max-w-[44vw] sm:max-w-none truncate">
+            Connect Wallet
+          </span>
+        </Button>
+      )}
 
 
       {/* Spacer */}
