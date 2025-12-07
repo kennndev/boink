@@ -182,8 +182,8 @@ router.post('/:walletAddress/flip', async (req, res) => {
   try {
     const { walletAddress } = req.params;
     const normalizedAddress = walletAddress.toLowerCase().trim();
-    const POINTS_PER_FLIP = 100;
-    const POINTS_FOR_FIRST_FLIP = 0; // First flip gets 0 points
+    const POINTS_FOR_FIRST_FLIP = 100; // First flip gets 100 points
+    const POINTS_FOR_SUBSEQUENT_FLIPS = 0; // All subsequent flips get 0 points
 
     let user = await User.findOne({ walletAddress: normalizedAddress });
 
@@ -202,7 +202,7 @@ router.post('/:walletAddress/flip', async (req, res) => {
     
     // Check if this is the first flip
     const isFirstFlip = user.flips === 0;
-    const pointsToAward = isFirstFlip ? POINTS_FOR_FIRST_FLIP : POINTS_PER_FLIP;
+    const pointsToAward = isFirstFlip ? POINTS_FOR_FIRST_FLIP : POINTS_FOR_SUBSEQUENT_FLIPS;
     
     console.log(`[Flip Points] Wallet: ${normalizedAddress}, Current flips: ${user.flips}, Is first flip: ${isFirstFlip}, Points to award: ${pointsToAward}`);
 
@@ -214,8 +214,8 @@ router.post('/:walletAddress/flip', async (req, res) => {
     res.json({
       success: true,
       message: isFirstFlip 
-        ? `First flip completed. No points awarded for first flip.`
-        : `Awarded ${POINTS_PER_FLIP} points for coin flip`,
+        ? `Awarded ${POINTS_FOR_FIRST_FLIP} points for first flip!`
+        : `Flip completed. No points awarded for subsequent flips.`,
       points: user.points,
       pointsAwarded: pointsToAward,
       isFirstFlip: isFirstFlip
