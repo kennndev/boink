@@ -212,10 +212,8 @@ export const CoinFlip = ({ connectedWallet, connectedWalletName, walletProviders
               const func = coinFlipContract.interface.getFunction("placeBet(uint8,uint256,uint256)");
               if (func) {
                 amountFlipDetected = true;
-                console.log("✅ CoinFlip contract supports placeBet(uint8,uint256,uint256)");
               }
             } catch (e) {
-              console.warn("⚠️ Could not detect placeBet(uint8,uint256,uint256):", e);
               // Fallback: If USDC is configured, assume contract supports amount-based betting
               // (The ABI has it, so detection might just be failing due to interface parsing)
               if (isUsdcConfigured && usdcAddress) {
@@ -238,7 +236,6 @@ export const CoinFlip = ({ connectedWallet, connectedWalletName, walletProviders
               const func = coinFlipContract.interface.getFunction("placeBetWithPermit(uint8,uint256,uint256,uint256,uint8,bytes32,bytes32)");
               if (func) {
                 permitBetDetected = true;
-                console.log("✅ CoinFlip contract supports placeBetWithPermit");
               }
             } catch (error) {
               console.log("⚠️ CoinFlip contract does not have placeBetWithPermit:", error);
@@ -361,22 +358,18 @@ export const CoinFlip = ({ connectedWallet, connectedWalletName, walletProviders
   // Comprehensive USDC permit support check
   const checkUSDCPermitSupport = async (usdcContract: ethers.Contract): Promise<boolean> => {
     try {
-      console.log("🔍 Checking USDC permit support...");
       
       // Check DOMAIN_SEPARATOR
       const domainSep = await usdcContract.DOMAIN_SEPARATOR();
       if (!domainSep || domainSep === "0x0000000000000000000000000000000000000000000000000000000000000000") {
-        console.log("❌ USDC DOMAIN_SEPARATOR is zero or invalid");
         return false;
       }
-      console.log("✅ USDC has DOMAIN_SEPARATOR:", domainSep);
       
       // Check nonces function exists
       try {
         const testNonce = await usdcContract.nonces("0x0000000000000000000000000000000000000000");
         console.log("✅ USDC has nonces() function");
       } catch {
-        console.log("❌ USDC nonces() function not available");
         return false;
       }
       
@@ -384,14 +377,11 @@ export const CoinFlip = ({ connectedWallet, connectedWalletName, walletProviders
       try {
         const permitFunc = usdcContract.interface.getFunction("permit");
         if (permitFunc) {
-          console.log("✅ USDC has permit() function in ABI");
         }
       } catch {
-        console.log("❌ USDC permit() function not in ABI");
         return false;
       }
       
-      console.log("✅✅✅ USDC FULLY SUPPORTS EIP-2612 PERMIT");
       return true;
     } catch (error: any) {
       console.log("❌ USDC permit check failed:", error.message);
@@ -473,7 +463,6 @@ export const CoinFlip = ({ connectedWallet, connectedWalletName, walletProviders
       });
  
     } catch (e: any) {
-      console.error("❌ Approval error:", e);
       // Some ERC20s (incl. USDC) require setting allowance to 0 before updating
       try {
         const tx0 = await (erc20.connect(signer) as any).approve(CONTRACT_ADDRESS, 0);
@@ -520,7 +509,6 @@ export const CoinFlip = ({ connectedWallet, connectedWalletName, walletProviders
     ethereumProvider: any
   ) => {
     try {
-      console.log("🚀 Attempting EIP-7702 batch transaction (wallet_sendCalls)");
       
       // Get network chain ID
       const network = await provider!.getNetwork();
@@ -569,7 +557,6 @@ export const CoinFlip = ({ connectedWallet, connectedWalletName, walletProviders
         atomicRequired: true // Both must succeed or both fail
       };
       
-      console.log("📤 Sending wallet_sendCalls batch:", batchParams);
       
       toast({
         title: "Batching Transactions",
@@ -582,7 +569,6 @@ export const CoinFlip = ({ connectedWallet, connectedWalletName, walletProviders
         params: [batchParams]
       });
       
-      console.log("✅ Batch transaction sent! Hash:", txHash);
       
       toast({
         title: "Batch Transaction Sent",
@@ -612,7 +598,6 @@ export const CoinFlip = ({ connectedWallet, connectedWalletName, walletProviders
         receiptBlockNumber: Number(receipt.blockNumber),
       };
     } catch (error: any) {
-      console.error("❌ EIP-7702 batch failed:", error);
       
       // Check if it's a capability problem (wallet doesn't support it)
       const isCapabilityProblem = 
@@ -622,7 +607,6 @@ export const CoinFlip = ({ connectedWallet, connectedWalletName, walletProviders
         error.nestedCode === 5710;
       
       if (isCapabilityProblem) {
-        console.log("⚠️ Wallet doesn't support EIP-7702 batching, will try permit/approve");
         throw new Error("WALLET_NO_EIP7702_SUPPORT");
       }
       
@@ -652,12 +636,7 @@ export const CoinFlip = ({ connectedWallet, connectedWalletName, walletProviders
         usdcContract!.DOMAIN_SEPARATOR()
       ]);
       
-      console.log("🔍 USDC Permit Domain Info:", {
-        tokenName,
-        chainId: network.chainId,
-        domainSeparator: domainSeparator
-      });
-      
+        
       // Try to find the correct EIP-712 domain version by testing common versions
       const usdcAddress = await usdcContract!.getAddress();
       
@@ -667,7 +646,6 @@ export const CoinFlip = ({ connectedWallet, connectedWalletName, walletProviders
         const versionFunc = usdcContract!.interface.getFunction("version");
         if (versionFunc) {
           contractVersion = await (usdcContract as any).version();
-          console.log(`📖 Contract exposes version(): "${contractVersion}"`);
         }
       } catch (e) {
         // Contract doesn't have version() function, that's okay
@@ -679,7 +657,6 @@ export const CoinFlip = ({ connectedWallet, connectedWalletName, walletProviders
       let correctVersion: string | null = null;
       let domain: any = null;
       
-      console.log("🔍 Trying to detect correct EIP-712 domain version...");
       for (const version of commonVersions) {
         const testDomain = {
           name: tokenName,
@@ -693,7 +670,6 @@ export const CoinFlip = ({ connectedWallet, connectedWalletName, walletProviders
           if (domainSeparator.toLowerCase() === expectedDomain.toLowerCase()) {
             correctVersion = version;
             domain = testDomain;
-            console.log(`✅ Found correct version: "${version}"`);
             break;
           }
         } catch (e) {
@@ -703,7 +679,6 @@ export const CoinFlip = ({ connectedWallet, connectedWalletName, walletProviders
       
       // If no version matched, default to "1" and log warning
       if (!domain) {
-        console.warn("⚠️ Could not detect domain version, defaulting to '1'. Permit may fail.");
         domain = {
           name: tokenName,
           version: "1",
@@ -712,14 +687,7 @@ export const CoinFlip = ({ connectedWallet, connectedWalletName, walletProviders
         };
       }
       
-      // Log final domain info
-      console.log("🔍 Final EIP-712 Domain:", {
-        name: domain.name,
-        version: domain.version || '(empty string)',
-        chainId: domain.chainId.toString(),
-        verifyingContract: domain.verifyingContract,
-        contractDomainSeparator: domainSeparator
-      });
+ 
       
       // EIP-712 types for permit
       const types = {
@@ -748,23 +716,14 @@ export const CoinFlip = ({ connectedWallet, connectedWalletName, walletProviders
       
       // Sign the permit using EIP-712 typed data signing (off-chain, no gas)
       const signature = await signer.signTypedData(domain, types, value);
+      const { v, r, s } = ethers.Signature.from(signature);
       
       toast({
         title: "Placing Bet with Permit",
         description: "Sending permit + bet in one transaction...",
       });
       
-      console.log("📤 Step 2: Sending ONE on-chain transaction (permit + placeBetWithPermit combined)");
-      console.log("   Permit parameters:", {
-        owner: ownerAddress,
-        spender: CONTRACT_ADDRESS,
-        value: amountUnits.toString(),
-        nonce: nonce.toString(),
-        deadline: deadline,
-        v: v,
-        r: r,
-        s: s
-      });
+   
       
       // Call placeBetWithPermit on the contract (single transaction!)
       // Function signature: placeBetWithPermit(uint8 guess, uint256 amount, uint256 seed, uint256 deadline, uint8 v, bytes32 r, bytes32 s)
@@ -1035,7 +994,6 @@ export const CoinFlip = ({ connectedWallet, connectedWalletName, walletProviders
                 const func = contract.interface.getFunction("placeBetWithPermit(uint8,uint256,uint256,uint256,uint8,bytes32,bytes32)");
                 if (func) {
                   realTimeHasPlaceBetWithPermit = true;
-                  console.log("✅ Real-time check: CoinFlip contract supports placeBetWithPermit");
                 }
               } catch (error) {
                 // Function not found, keep realTimeHasPlaceBetWithPermit as false
@@ -1046,9 +1004,7 @@ export const CoinFlip = ({ connectedWallet, connectedWalletName, walletProviders
             if (canUsePermitRealTime) {
               console.log("  ⚠️  FALLING BACK TO: PERMIT MODE");
             } else {
-              console.log("  ⚠️  FALLING BACK TO: APPROVE MODE");
               if (!permitSupported) {
-                console.log("     Reason: USDC does not support EIP-2612 permit");
               } else if (!realTimeHasPlaceBetWithPermit) {
               
               }
@@ -1064,7 +1020,6 @@ export const CoinFlip = ({ connectedWallet, connectedWalletName, walletProviders
             const func = contract.interface.getFunction("placeBetWithPermit(uint8,uint256,uint256,uint256,uint8,bytes32,bytes32)");
             if (func) {
               realTimeHasPlaceBetWithPermit = true;
-              console.log("✅ Real-time check: CoinFlip contract supports placeBetWithPermit");
             }
           } catch (error) {
             // Function not found
@@ -1087,10 +1042,8 @@ export const CoinFlip = ({ connectedWallet, connectedWalletName, walletProviders
             );
             betId = result.betId;
             receiptBlockNumber = result.receiptBlockNumber;
-            console.log("✅ PERMIT MODE: Success! Bet placed in single transaction");
           } catch (permitError: any) {
             console.error("❌ PERMIT MODE: Failed, falling back to APPROVE mode");
-            console.error("   Error:", permitError.message);
             
             if (permitError.code === "ACTION_REJECTED") {
               setIsFlipping(false);
@@ -1126,8 +1079,7 @@ export const CoinFlip = ({ connectedWallet, connectedWalletName, walletProviders
             if (!permitSupported) {
               console.log("     Reason: USDC does not support EIP-2612 permit");
             } else if (!hasPlaceBetWithPermit) {
-              console.log("     Reason: CoinFlip contract missing placeBetWithPermit function");
-              console.log("     → Check: Is coinFlip.json ABI up to date?");
+            
             }
    
             
@@ -1146,8 +1098,7 @@ export const CoinFlip = ({ connectedWallet, connectedWalletName, walletProviders
               return;
             }
           } else {
-            console.log("  ✅ MODE: DIRECT BET (No Approval Needed)");
-            console.log("     → Allowance already sufficient, placing bet directly");
+         
           }
         }
       }
