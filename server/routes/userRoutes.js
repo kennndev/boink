@@ -145,8 +145,15 @@ router.get('/:walletAddress', async (req, res) => {
     if (!user) {
       user = new User({
         walletAddress: normalizedAddress,
-        points: 0
+        points: 0,
+        flips: 0
       });
+      await user.save();
+    }
+    
+    // Ensure flips is initialized (for existing users who might not have it)
+    if (user.flips === undefined || user.flips === null) {
+      user.flips = 0;
       await user.save();
     }
 
@@ -188,9 +195,16 @@ router.post('/:walletAddress/flip', async (req, res) => {
       });
     }
 
+    // Ensure flips is initialized (for existing users who might not have it)
+    if (user.flips === undefined || user.flips === null) {
+      user.flips = 0;
+    }
+    
     // Check if this is the first flip
     const isFirstFlip = user.flips === 0;
     const pointsToAward = isFirstFlip ? POINTS_FOR_FIRST_FLIP : POINTS_PER_FLIP;
+    
+    console.log(`[Flip Points] Wallet: ${normalizedAddress}, Current flips: ${user.flips}, Is first flip: ${isFirstFlip}, Points to award: ${pointsToAward}`);
 
     // Award points and increment flip count
     user.points += pointsToAward;
