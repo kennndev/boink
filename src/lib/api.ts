@@ -679,7 +679,7 @@ export async function getOracleStatus(): Promise<{ success: boolean; data?: Orac
  * OPTIMIZED: Frontend sends clientSeed directly to avoid backend event query
  * Returns outcome immediately (0 = heads, 1 = tails) for instant UX
  */
-export async function resolveBetImmediately(betId: number | bigint | string, clientSeed?: number | bigint | string): Promise<{ success: boolean; transactionHash?: string; outcome?: number; error?: string; alreadyResolved?: boolean; pending?: boolean }> {
+export async function resolveBetImmediately(betId: number | bigint | string, clientSeed?: number | bigint | string): Promise<{ success: boolean; transactionHash?: string; outcome?: number; error?: string; alreadyResolved?: boolean; pending?: boolean; betStatus?: number }> {
   try {
     // Use Heroku bet resolver service for fast resolution
     const response = await fetch(`${BET_RESOLVER_URL}/oracle/resolve-bet`, {
@@ -706,16 +706,27 @@ export async function resolveBetImmediately(betId: number | bigint | string, cli
       };
     }
     
-    // Handle 400 error for "already resolved" or "not pending" - check if it's already resolved
-    if (response.status === 400 && (data.status === 2 || data.alreadyResolved)) {
+    // Handle 400 error for "already resolved" or "not pending"
+    if (response.status === 400) {
+      // Check if bet is already resolved (status 2 = SETTLED)
+      if (data.status === 2 || data.alreadyResolved) {
+        // Bet was already resolved - this is actually OK, we can get outcome from chain
+        return {
+          success: true,
+          alreadyResolved: true,
+          error: data.message || 'Bet was already resolved',
+          // Note: outcome not available in 400 response, will need to query from chain
+        };
+      }
+      // Bet is not pending for other reasons (might be refunded, invalid, etc.)
       return {
-        success: true,
-        alreadyResolved: true,
-        error: data.message || 'Bet was already resolved'
+        success: false,
+        error: data.error || data.message || 'Bet is not in a resolvable state',
+        betStatus: data.status
       };
     }
     
-    // Handle other errors
+    // Handle other errors (500, network errors, etc.)
     return {
       success: false,
       error: data.error || data.message || 'Failed to resolve bet'
