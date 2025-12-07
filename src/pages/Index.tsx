@@ -531,8 +531,22 @@ const Index = () => {
           if ((window as any).zerion && typeof (window as any).zerion.request === "function") {
             return (window as any).zerion;
           }
-          if ((window as any).zerionWallet && typeof (window as any).zerionWallet.request === "function") {
-            return (window as any).zerionWallet;
+          // Check window.zerionWallet - it might have request or be accessed differently
+          const zerionWallet = (window as any).zerionWallet;
+          if (zerionWallet) {
+            // Check if it has request function directly
+            if (typeof zerionWallet.request === "function") {
+              return zerionWallet;
+            }
+            // Check if it has an ethereum property with request
+            if (zerionWallet.ethereum && typeof zerionWallet.ethereum.request === "function") {
+              return zerionWallet.ethereum;
+            }
+            // If it has isZerion flag, try using it anyway (might work)
+            if (zerionWallet.isZerion) {
+              console.log('⚠️ window.zerionWallet found with isZerion flag, but no request function. Trying anyway...');
+              return zerionWallet;
+            }
           }
           
           // Check providers array
@@ -556,13 +570,33 @@ const Index = () => {
         const reDetected = reDetectZerion();
         if (reDetected) {
           console.log('✅ Re-detected Zerion at click time');
-          provider = reDetected;
+          // Check if it has request function - if not, it might still work
+          if (typeof reDetected.request === "function") {
+            provider = reDetected;
+          } else {
+            console.warn('⚠️ Zerion detected but no request function. Checking alternative access methods...');
+            // Try to find a provider that has request function
+            const zerionWallet = (window as any).zerionWallet;
+            if (zerionWallet?.ethereum && typeof zerionWallet.ethereum.request === "function") {
+              provider = zerionWallet.ethereum;
+              console.log('✅ Using zerionWallet.ethereum');
+            } else if (zerionWallet && typeof zerionWallet.request === "function") {
+              provider = zerionWallet;
+              console.log('✅ Using zerionWallet directly');
+            } else {
+              // Last resort: use it anyway and hope it works
+              provider = reDetected;
+              console.warn('⚠️ Using Zerion provider without confirmed request function');
+            }
+          }
         }
-           
-        // Try to find Zerion in multiple ways - check ALL possible locations
-        provider = walletProviders["Zerion"] 
-          ?? (window as any).zerion
-          ?? (window as any).zerionWallet
+        
+        // Only try other methods if re-detection didn't find it
+        if (!provider) {
+          // Try to find Zerion in multiple ways - check ALL possible locations
+          provider = walletProviders["Zerion"] 
+            ?? (window as any).zerion
+            ?? (window as any).zerionWallet
           ?? (window as any).ethereum?.providers?.find((p: any) => {
             const isZerion = p?.isZerion || p?.isZerionWallet || p?._isZerion ||
               p?.constructor?.name?.includes('Zerion') ||
@@ -706,9 +740,11 @@ const Index = () => {
           console.error('   Has request function:', provider && typeof provider.request === "function");
           
           // Last resort: try to find Zerion in all possible locations
+          const zerionWallet = (window as any).zerionWallet;
           const lastResortZerion = 
             (window as any).zerion ||
-            (window as any).zerionWallet ||
+            (zerionWallet?.ethereum && typeof zerionWallet.ethereum.request === "function" ? zerionWallet.ethereum : undefined) ||
+            (zerionWallet && typeof zerionWallet.request === "function" ? zerionWallet : undefined) ||
             (Array.isArray((window as any).ethereum?.providers) 
               ? (window as any).ethereum.providers.find((p: any) => {
                   if (!p || p.isMetaMask) return false;
@@ -720,6 +756,16 @@ const Index = () => {
           if (lastResortZerion && typeof lastResortZerion.request === "function") {
             console.log('✅ Found Zerion on last resort check');
             provider = lastResortZerion;
+          } else if (zerionWallet && zerionWallet.isZerion) {
+            // Even if it doesn't have request, if it has isZerion flag, try using it
+            // Zerion might expose request function differently
+            console.log('⚠️ window.zerionWallet has isZerion flag but no request function. Trying to use it anyway...');
+            // Try to access request through different paths
+            if (zerionWallet.ethereum) {
+              provider = zerionWallet.ethereum;
+            } else {
+              provider = zerionWallet;
+            }
           } else {
             // For Zerion, don't fallback to MetaMask - show error instead
             const ethereumProvider = (window as any).ethereum;
@@ -763,8 +809,37 @@ const Index = () => {
       }
 
       // Final check: If user clicked Zerion but provider is MetaMask, reject it
-      if (walletName === "Zerion" && provider && (provider as any).isMetaMask) {
-        throw new Error('Zerion wallet not detected. MetaMask is currently active. Please install Zerion extension or set it as your primary wallet.');
+      // BUT: If provider has isZerion flag, it's definitely Zerion (even if MetaMask is also present)
+      if (walletName === "Zerion") {
+        // Check if window.zerionWallet exists - if so, use it even if provider doesn't have request
+        const zerionWallet = (window as any).zerionWallet;
+        if (zerionWallet && zerionWallet.isZerion) {
+          // Try to get the actual provider from zerionWallet
+          if (zerionWallet.ethereum && typeof zerionWallet.ethereum.request === "function") {
+            console.log('✅ Using zerionWallet.ethereum as provider');
+            provider = zerionWallet.ethereum;
+          } else if (typeof zerionWallet.request === "function") {
+            console.log('✅ Using zerionWallet directly as provider');
+            provider = zerionWallet;
+          } else if (!provider || (provider as any).isMetaMask) {
+            // If current provider is MetaMask or undefined, try using zerionWallet anyway
+            console.log('⚠️ Using zerionWallet even without confirmed request function');
+            provider = zerionWallet;
+          }
+        }
+        
+        if (provider) {
+          const isZerion = (provider as any).isZerion || (provider as any).isZerionWallet || (provider as any)._isZerion;
+          const isMetaMask = (provider as any).isMetaMask;
+          
+          // If it's both MetaMask and Zerion, prefer Zerion (Zerion can wrap MetaMask)
+          if (isMetaMask && !isZerion) {
+            console.error('❌ Provider is MetaMask, not Zerion');
+            throw new Error('Zerion wallet not detected. MetaMask is currently active. Please install Zerion extension or set it as your primary wallet.');
+          } else if (isZerion) {
+            console.log('✅ Confirmed: Provider is Zerion (isZerion flag present)');
+          }
+        }
       }
       
       accounts = await provider.request({
@@ -1631,6 +1706,8 @@ const Index = () => {
       {showStartMenu && (
         <StartMenu
           connectedWallet={connectedWallet}
+          connectedWalletName={connectedWalletName}
+          walletProviders={walletProviders}
           onClose={() => setShowStartMenu(false)}
           isOpen={showStartMenu}
         />
