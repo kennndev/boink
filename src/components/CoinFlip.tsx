@@ -54,7 +54,7 @@ export const CoinFlip = ({ connectedWallet, connectedWalletName, walletProviders
 
   useEffect(() => {
     // Use wallet name to get provider, or try to find it by checking window.ethereum
-    const walletName = connectedWalletName || "MetaMask"; // Default to MetaMask if not specified
+    const walletName = connectedWalletName || ""; // Default to MetaMask if not specified
     const ethereumProvider = walletProviders[walletName] || (window as any).ethereum;
     
     if (connectedWallet && ethereumProvider && isContractConfigured) {
@@ -436,7 +436,7 @@ export const CoinFlip = ({ connectedWallet, connectedWalletName, walletProviders
     
     toast({
       title: "Approval Required",
-      description: "Please approve USDC spending in MetaMask",
+      description: "Please approve USDC spending",
     });
     
     try {
@@ -746,11 +746,8 @@ export const CoinFlip = ({ connectedWallet, connectedWalletName, walletProviders
         description: "Please sign the permit message (off-chain, no gas cost)",
       });
       
-      console.log("📝 Step 1: Signing permit off-chain (MetaMask will show 'approve spending' but this is just a signature, no gas)");
       // Sign the permit using EIP-712 typed data signing (off-chain, no gas)
       const signature = await signer.signTypedData(domain, types, value);
-      console.log("✅ Permit signed successfully (off-chain, no gas paid)");
-      const { v, r, s } = ethers.Signature.from(signature);
       
       toast({
         title: "Placing Bet with Permit",
@@ -778,18 +775,11 @@ export const CoinFlip = ({ connectedWallet, connectedWalletName, walletProviders
       if (deadline <= currentTimestamp) {
         throw new Error(`Permit deadline has expired. Deadline: ${deadline}, Current: ${currentTimestamp}`);
       }
-      
-      console.log("🔍 Validating permit parameters...");
-      console.log("   Owner:", ownerAddress);
-      console.log("   Spender:", CONTRACT_ADDRESS);
-      console.log("   Amount:", amountUnits.toString());
-      console.log("   Nonce:", nonce.toString());
-      console.log("   Deadline:", deadline, `(${Math.floor((deadline - currentTimestamp) / 60)} minutes from now)`);
-      console.log("   Signature v:", v, "r:", r.slice(0, 10) + "...", "s:", s.slice(0, 10) + "...");
-      
-      // First, try to simulate the transaction to get revert reason if it fails
+         // First, try to simulate the transaction to get revert reason if it fails
+      // NOTE: staticCall() is read-only (eth_call) and should NOT trigger MetaMask popup
+      // It's executed locally to check if the transaction would succeed before sending
       try {
-        console.log("🔍 Simulating transaction to check for revert reasons...");
+  
         await (contractWithSigner as any).placeBetWithPermit.staticCall(
           guess,
           amountUnits,
@@ -799,9 +789,7 @@ export const CoinFlip = ({ connectedWallet, connectedWalletName, walletProviders
           r,
           s
         );
-        console.log("✅ Simulation successful - transaction should work");
       } catch (simError: any) {
-        console.error("❌ Transaction simulation failed!");
         console.error("   Error:", simError);
         if (simError.reason) {
           console.error("   Revert reason:", simError.reason);
@@ -825,8 +813,7 @@ export const CoinFlip = ({ connectedWallet, connectedWalletName, walletProviders
 2. Wrong nonce (used: ${nonce.toString()})
 3. Expired deadline (deadline: ${deadline}, current: ${currentTimestamp})
 4. Invalid signature (v=${v}, r=${r.slice(0, 10)}..., s=${s.slice(0, 10)}...)
-
-Check console for full error details.`);
+`);
         }
         
         // Still throw the original error with more context
@@ -853,10 +840,7 @@ Check console for full error details.`);
       
       // Check if transaction reverted
       if (receipt.status === 0) {
-        console.error("❌ Transaction reverted! Receipt:", receipt);
-        console.error("   Transaction hash:", receipt.hash);
-        console.error("   Gas used:", receipt.gasUsed.toString());
-        console.error("   To address:", receipt.to);
+ 
         
         // Common revert reasons for permit:
         // 1. Invalid permit signature (wrong domain/version/nonce/deadline)
@@ -868,9 +852,7 @@ Check console for full error details.`);
 1. Permit signature is invalid (check domain version - try changing from "1" to "2")
 2. Permit deadline expired
 3. USDC contract doesn't actually support permit() function
-4. Contract validation failed (check balance, max bet, liquidity)
-
-Check console for permit parameters.`);
+4. Contract validation failed (check balance, max bet, liquidity)`);
       }
       
       const betPlacedEvent = receipt.logs.find((log: any) => {
@@ -883,7 +865,6 @@ Check console for permit parameters.`);
       });
       
       if (!betPlacedEvent) {
-        console.error("❌ BetPlaced event not found. Receipt logs:", receipt.logs);
         throw new Error("BetPlaced event not found in transaction receipt");
       }
       
@@ -899,16 +880,6 @@ Check console for permit parameters.`);
   };
 
   const handleFlip = async () => {
-    // Debug logging
-    console.log('Flip button clicked', {
-      isContractConfigured,
-      contract: !!contract,
-      provider: !!provider,
-      selectedSide,
-      hasAmountFlip,
-      isUsdcConfigured,
-      usdcContract: !!usdcContract
-    });
 
     if (!isContractConfigured) {
       toast({
@@ -1017,28 +988,12 @@ Check console for permit parameters.`);
         const needsApproval = currentAllowance < amountUnits;
         const canUsePermit = needsApproval && permitSupported && hasPlaceBetWithPermit;
         const canUseBatch = needsApproval; // Try batch if approval needed (chain supports it)
-        
-        console.log("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
-        console.log("🎯 TRANSACTION MODE DECISION:");
-        console.log("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
-        console.log("  Current Allowance:", ethers.formatUnits(currentAllowance, usdcDecimals), "USDC");
-        console.log("  Bet Amount:", ethers.formatUnits(amountUnits, usdcDecimals), "USDC");
-        console.log("  Needs Approval:", needsApproval);
-        console.log("  USDC Supports Permit:", permitSupported);
-        console.log("  Contract Has placeBetWithPermit:", hasPlaceBetWithPermit);
-        console.log("  Chain Supports EIP-7702: YES (confirmed via test)");
-        console.log("  ────────────────────────────────────────────────────");
-        
+       
         // Priority 1: Try EIP-7702 batch (if wallet supports it)
         if (canUseBatch) {
-          console.log("  🚀 MODE: EIP-7702 BATCH (Single Transaction)");
-          console.log("     → Attempting wallet_sendCalls to batch approve + bet");
-          console.log("     → Note: MetaMask may not support this on Ink Sepolia yet");
-          console.log("     → Will fall back to permit/approve if wallet doesn't support");
-          console.log("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
-          
+   
           try {
-            const ethereumProvider = walletProviders[connectedWalletName || "MetaMask"] || (window as any).ethereum;
+            const ethereumProvider = walletProviders[connectedWalletName || ""] || (window as any).ethereum;
             if (!ethereumProvider) {
               throw new Error("No ethereum provider available");
             }
@@ -1054,10 +1009,8 @@ Check console for permit parameters.`);
             );
             betId = result.betId;
             receiptBlockNumber = result.receiptBlockNumber;
-            console.log("✅✅✅ EIP-7702 BATCH MODE: Success! Both approve + bet in ONE transaction!");
           } catch (batchError: any) {
             console.error("❌ EIP-7702 BATCH MODE: Failed");
-            console.error("   Error:", batchError.message);
             
             if (batchError.message === "WALLET_NO_EIP7702_SUPPORT") {
               console.log("   → Wallet doesn't support EIP-7702, trying permit...");
@@ -1097,8 +1050,7 @@ Check console for permit parameters.`);
               if (!permitSupported) {
                 console.log("     Reason: USDC does not support EIP-2612 permit");
               } else if (!realTimeHasPlaceBetWithPermit) {
-                console.log("     Reason: CoinFlip contract missing placeBetWithPermit function");
-                console.log("     → Check: Is coinFlip.json ABI up to date?");
+              
               }
             }
           }
@@ -1121,13 +1073,7 @@ Check console for permit parameters.`);
         const canUsePermitRealTime = needsApproval && permitSupported && realTimeHasPlaceBetWithPermit;
         
         if (!betId && canUsePermitRealTime) {
-          console.log("  ✅ MODE: PERMIT (Single On-Chain Transaction)");
-          console.log("     → MetaMask Popup 1: Sign permit (off-chain, no gas)");
-          console.log("       (MetaMask may show this as 'approve spending' - this is normal)");
-          console.log("     → MetaMask Popup 2: One on-chain transaction");
-          console.log("       (This transaction does: permit + placeBetWithPermit)");
-          console.log("     → Result: 2 MetaMask popups, but only 1 on-chain transaction");
-          console.log("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
+
           
           // ========== PERMIT MODE ==========
           try {
@@ -1158,8 +1104,7 @@ Check console for permit parameters.`);
             }
             
             // Fall through to APPROVE mode
-            console.log("  ⚠️  FALLING BACK TO: APPROVE MODE");
-            try {
+                      try {
               await ensureAllowance(amountUnits, provider, usdcContract!, ownerAddress);
             } catch (approvalError: any) {
               setIsFlipping(false);
@@ -1184,9 +1129,7 @@ Check console for permit parameters.`);
               console.log("     Reason: CoinFlip contract missing placeBetWithPermit function");
               console.log("     → Check: Is coinFlip.json ABI up to date?");
             }
-            console.log("     → Transaction 1: approve() - Set spending cap");
-            console.log("     → Transaction 2: placeBet() - Place bet");
-            console.log("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
+   
             
             try {
               await ensureAllowance(amountUnits, provider, usdcContract!, ownerAddress);
@@ -1205,7 +1148,6 @@ Check console for permit parameters.`);
           } else {
             console.log("  ✅ MODE: DIRECT BET (No Approval Needed)");
             console.log("     → Allowance already sufficient, placing bet directly");
-            console.log("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
           }
         }
       }
@@ -1297,8 +1239,11 @@ Check console for permit parameters.`);
       
       if (!resolveResult.success) {
         // Fallback: try to poll on-chain as backup
-        console.warn("Backend resolution failed, falling back to on-chain polling:", resolveResult.error);
-        
+        // This happens when:
+        // 1. Oracle service returns 400 (bet not pending/already resolved)
+        // 2. Oracle service is down or returns 500 error
+        // 3. Network error connecting to oracle service
+              
         const MAX_WAIT_TIME = 30000;
         const POLL_INTERVAL = 2000;
         const startTime = Date.now();
