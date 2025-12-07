@@ -108,42 +108,80 @@ export const Leaderboard = ({ connectedWallet, connectedWalletName, walletProvid
       console.log("🔍 Creating event filter...");
       const filter = contract.filters.BetResolved();
       
-      // Get current block number and query from block 0 to get all history
+      // Get current block number
       console.log("🔍 Getting current block number...");
       const currentBlock = await provider.getBlockNumber();
       console.log(`📦 Current block: ${currentBlock}`);
       
-      // Query from block 0 to get all events (or use a reasonable starting block if chain is very long)
-      // For testnets, querying from 0 is usually fine. For mainnets, you might want to limit this.
-      const fromBlock = 0;
-      console.log(`🔍 Querying BetResolved events from block ${fromBlock} to ${currentBlock}...`);
+      // RPC providers typically limit queries to 100,000 blocks
+      // Query in chunks to avoid exceeding the limit
+      const MAX_BLOCK_RANGE = 100000;
+      const fromBlock = Math.max(0, currentBlock - MAX_BLOCK_RANGE);
+      console.log(`🔍 Querying BetResolved events from block ${fromBlock} to ${currentBlock} (last ${currentBlock - fromBlock} blocks)...`);
       
-      // Add timeout to prevent hanging (increase timeout for larger queries)
-      const queryPromise = contract.queryFilter(filter, fromBlock, currentBlock);
-      const timeoutPromise = new Promise((_, reject) => 
-        setTimeout(() => reject(new Error("Query timeout after 60 seconds")), 60000)
-      );
+      // Helper function to query events in chunks
+      const queryEventsInChunks = async (eventFilter: any, startBlock: number, endBlock: number): Promise<any[]> => {
+        const allEvents: any[] = [];
+        let currentStart = startBlock;
+        
+        while (currentStart <= endBlock) {
+          const currentEnd = Math.min(currentStart + MAX_BLOCK_RANGE - 1, endBlock);
+          console.log(`  Querying blocks ${currentStart} to ${currentEnd}...`);
+          
+          try {
+            const chunkEvents = await contract.queryFilter(eventFilter, currentStart, currentEnd);
+            allEvents.push(...chunkEvents);
+            console.log(`  ✅ Found ${chunkEvents.length} events in this chunk`);
+          } catch (chunkError: any) {
+            console.warn(`  ⚠️ Error querying chunk ${currentStart}-${currentEnd}:`, chunkError.message);
+            // Continue with next chunk even if one fails
+          }
+          
+          currentStart = currentEnd + 1;
+          
+          // Small delay to avoid rate limiting
+          if (currentStart <= endBlock) {
+            await new Promise(resolve => setTimeout(resolve, 100));
+          }
+        }
+        
+        return allEvents;
+      };
       
       let events: any[] = [];
       try {
-        events = await Promise.race([queryPromise, timeoutPromise]) as any[];
+        // Try querying last 100k blocks first (most recent players)
+        events = await queryEventsInChunks(filter, fromBlock, currentBlock);
         console.log(`✅ Found ${events.length} BetResolved events`);
+        
+        // If we got events but want to check older blocks too, query backwards in chunks
+        if (events.length > 0 && fromBlock > 0) {
+          console.log("🔍 Checking older blocks for more players...");
+          let olderFromBlock = Math.max(0, fromBlock - MAX_BLOCK_RANGE);
+          const olderEvents = await queryEventsInChunks(filter, olderFromBlock, fromBlock - 1);
+          if (olderEvents.length > 0) {
+            events.push(...olderEvents);
+            console.log(`✅ Found ${olderEvents.length} additional events from older blocks`);
+          }
+        }
       } catch (queryError: any) {
         console.warn("⚠️ Error querying BetResolved events, trying BetPlaced events instead:", queryError);
         
         // Fallback: Try BetPlaced events instead
         try {
           const betPlacedFilter = contract.filters.BetPlaced();
-          const betPlacedPromise = contract.queryFilter(betPlacedFilter, fromBlock, currentBlock);
-          const betPlacedTimeout = new Promise((_, reject) => 
-            setTimeout(() => reject(new Error("Query timeout")), 60000)
-          );
-          events = await Promise.race([betPlacedPromise, betPlacedTimeout]) as any[];
+          events = await queryEventsInChunks(betPlacedFilter, fromBlock, currentBlock);
           console.log(`✅ Found ${events.length} BetPlaced events (using as fallback)`);
         } catch (fallbackError) {
           console.error("❌ Both BetResolved and BetPlaced queries failed:", fallbackError);
-          throw new Error("Failed to query events from contract");
+          // Don't throw - will use backend fallback
+          events = [];
         }
+      }
+      
+      // If events query completely failed, don't throw - use backend fallback instead
+      if (events.length === 0) {
+        console.log("⚠️ No events found, will use backend database fallback");
       }
 
       // Get unique player addresses from events
