@@ -449,6 +449,24 @@ const Index = () => {
     };
   }, []);
 
+  const handleWalletDisconnect = () => {
+    // Clear wallet connection state
+    setConnectedWallet(null);
+    setConnectedWalletName(null);
+    
+    // Clear localStorage
+    localStorage.removeItem('coinflip_connectedWallet');
+    localStorage.removeItem('coinflip_connectedWalletName');
+    
+    // Clear wallet providers (optional - you might want to keep them)
+    // setWalletProviders({});
+    
+    toast({
+      title: "Wallet Disconnected",
+      description: "Your wallet has been disconnected",
+    });
+  };
+
   const handleWalletConnect = async (walletName: string) => {
     console.log('=== WALLET CONNECT CLICKED ===');
     console.log('Wallet name:', walletName);
@@ -1542,12 +1560,13 @@ const Index = () => {
       )}
 
       {/* Taskbar */}
-      <Taskbar
-        onStartClick={() => setShowStartMenu(!showStartMenu)}
-        onConnectWalletClick={() => setShowWalletModal(true)}
-        connectedWallet={connectedWallet}
-        blockNumber={blockNumber}
-      />
+        <Taskbar
+          onStartClick={() => setShowStartMenu(!showStartMenu)}
+          onConnectWalletClick={() => setShowWalletModal(true)}
+          onDisconnectWallet={handleWalletDisconnect}
+          connectedWallet={connectedWallet}
+          blockNumber={blockNumber}
+        />
       
       {/* Toast notifications */}
       <Toaster />
