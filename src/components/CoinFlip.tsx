@@ -1407,10 +1407,16 @@ Check console for permit parameters.`);
         awardFlipPoints(ownerAddress).then(pointsResult => {
           if (pointsResult.success && pointsResult.points !== undefined) {
             setUserPoints(pointsResult.points);
-            toast({
-              title: "🎉 Points Awarded!",
-              description: `+${pointsResult.pointsAwarded} points! Total: ${pointsResult.points}`,
-            });
+            // Only show toast if points were actually awarded
+            if (pointsResult.pointsAwarded && pointsResult.pointsAwarded > 0) {
+              toast({
+                title: "🎉 Points Awarded!",
+                description: `+${pointsResult.pointsAwarded} points! Total: ${pointsResult.points}`,
+              });
+            } else if (!pointsResult.isFirstFlip) {
+              // Silently handle subsequent flips - no toast needed (0 points)
+              console.log("Subsequent flip completed - no points awarded");
+            }
           }
         }).catch(() => {});
       }
