@@ -26,6 +26,7 @@ interface PlayerStats {
 interface ReferralStats {
   address: string;
   totalReferrals: number;
+  referralPoints: number; // totalReferrals * 20
   code: string;
   active: boolean;
 }
@@ -426,9 +427,12 @@ export const Leaderboard = ({ connectedWallet, connectedWalletName, walletProvid
       const referralStatsPromises = Array.from(uniqueReferrers).map(async (address) => {
         try {
           const [code, totalReferrals, active] = await contract.getReferrerStats(address);
+          const referralsCount = Number(totalReferrals ?? 0);
+          const points = referralsCount * 20; // 20 points per referral
           return {
             address,
-            totalReferrals: Number(totalReferrals ?? 0),
+            totalReferrals: referralsCount,
+            referralPoints: points,
             code: code !== ethers.ZeroHash ? ethers.hexlify(code).slice(0, 10) + "..." : "N/A",
             active: active ?? false,
           } as ReferralStats;
@@ -442,8 +446,8 @@ export const Leaderboard = ({ connectedWallet, connectedWalletName, walletProvid
       const validStats = allStats.filter((stat): stat is ReferralStats => stat !== null && stat.totalReferrals > 0);
       console.log(`✅ Loaded stats for ${validStats.length} referrers`);
 
-      // Sort by totalReferrals (descending)
-      const sorted = [...validStats].sort((a, b) => b.totalReferrals - a.totalReferrals);
+      // Sort by referralPoints (descending)
+      const sorted = [...validStats].sort((a, b) => b.referralPoints - a.referralPoints);
 
       setReferrals(sorted);
     } catch (e: any) {
@@ -469,7 +473,7 @@ export const Leaderboard = ({ connectedWallet, connectedWalletName, walletProvid
           🏆 LEADERBOARD 🏆
         </h2>
         <p className="text-xs sm:text-sm font-retro text-muted-foreground">
-          {activeTab === "onchain" ? "Top players ranked by their performance" : "Top referrers ranked by total referrals"}
+          {activeTab === "onchain" ? "Top players ranked by their performance" : "Top referrers ranked by referral points"}
         </p>
       </div>
 
@@ -559,7 +563,7 @@ export const Leaderboard = ({ connectedWallet, connectedWalletName, walletProvid
                     <tr className="border-b-2 border-gray-400">
                       <th className="text-left text-gray-600 p-2 font-pixel text-xs sm:text-sm">Rank</th>
                       <th className="text-left text-gray-600 p-2 font-pixel text-xs sm:text-sm">Address</th>
-                      <th className="text-right text-gray-600 p-2 font-pixel text-xs sm:text-sm">Total Referrals</th>
+                      <th className="text-right text-gray-600 p-2 font-pixel text-xs sm:text-sm">Referral Points</th>
                       <th className="text-center text-gray-600 p-2 font-pixel text-xs sm:text-sm">Status</th>
                     </tr>
                   </thead>
@@ -580,7 +584,7 @@ export const Leaderboard = ({ connectedWallet, connectedWalletName, walletProvid
                           {formatAddress(referral.address)}
                         </td>
                         <td className="p-2 font-pixel text-xs sm:text-sm text-right text-green-600 font-bold">
-                          {referral.totalReferrals}
+                          {referral.referralPoints}
                         </td>
                         <td className="p-2 font-pixel text-xs sm:text-sm text-center">
                           <span className={`px-2 py-1 rounded ${referral.active ? "bg-green-200 text-green-800" : "bg-gray-200 text-gray-600"}`}>
@@ -620,8 +624,8 @@ export const Leaderboard = ({ connectedWallet, connectedWalletName, walletProvid
                   </div>
                   <div className="grid grid-cols-2 gap-2 text-xs">
                     <div className="flex justify-between">
-                      <span className="font-retro text-gray-600">Referrals:</span>
-                      <span className="font-pixel text-green-600 font-bold">{referral.totalReferrals}</span>
+                      <span className="font-retro text-gray-600">Points:</span>
+                      <span className="font-pixel text-green-600 font-bold">{referral.referralPoints}</span>
                     </div>
                     <div className="flex justify-between">
                       <span className="font-retro text-gray-600">Status:</span>
