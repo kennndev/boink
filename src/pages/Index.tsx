@@ -547,14 +547,27 @@ const Index = () => {
           if (mightBeZerion) {
             provider = ethereumProvider;
           } else {
-            // Still use it as fallback - Zerion might work through window.ethereum
-            provider = ethereumProvider;
+            // Check if window.ethereum is actually MetaMask - if so, don't use it for Zerion
+            const isMetaMask = ethereumProvider.isMetaMask;
+            if (isMetaMask) {
+              // Don't use MetaMask as fallback for Zerion - show error instead
+              provider = undefined;
+            } else {
+              // Only use as fallback if it's not MetaMask
+              provider = ethereumProvider;
+            }
           }
         }
         
-        // Final fallback
+        // Final fallback - but don't use MetaMask for Zerion
         if (!provider) {
-          provider = walletProviders["Ethereum Wallet"] ?? (window as any).ethereum;
+          const fallbackProvider = walletProviders["Ethereum Wallet"] ?? (window as any).ethereum;
+          // Check if fallback is MetaMask - if so, reject it for Zerion
+          if (fallbackProvider && fallbackProvider.isMetaMask) {
+            provider = undefined;
+          } else {
+            provider = fallbackProvider;
+          }
         }
           
         if (provider) {
@@ -613,10 +626,15 @@ const Index = () => {
 
       if (!provider || typeof provider.request !== "function") {
         if (walletName === "Zerion") {
-          // For Zerion, try one more time with window.ethereum as fallback
-          provider = (window as any).ethereum;
-          if (provider && typeof provider.request === "function") {
-            console.log('✅ Using window.ethereum as Zerion provider');
+          // For Zerion, don't fallback to MetaMask - show error instead
+          const ethereumProvider = (window as any).ethereum;
+          if (ethereumProvider && ethereumProvider.isMetaMask) {
+            console.error('❌ Zerion not found. MetaMask is detected but cannot be used for Zerion connection.');
+            throw new Error('Zerion wallet not detected. Please make sure Zerion extension is installed and enabled. If you have multiple wallets, you may need to set Zerion as the primary wallet in your browser.');
+          } else if (ethereumProvider && typeof ethereumProvider.request === "function") {
+            // Only use if it's not MetaMask
+            provider = ethereumProvider;
+            console.log('✅ Using window.ethereum as Zerion provider (not MetaMask)');
           } else {
             console.error('❌ Zerion provider not available');
           }
@@ -647,6 +665,11 @@ const Index = () => {
         }
       }
 
+      // Final check: If user clicked Zerion but provider is MetaMask, reject it
+      if (walletName === "Zerion" && provider && (provider as any).isMetaMask) {
+        throw new Error('Zerion wallet not detected. MetaMask is currently active. Please install Zerion extension or set it as your primary wallet.');
+      }
+      
       accounts = await provider.request({
         method: "eth_requestAccounts",
       });
