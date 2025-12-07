@@ -45,7 +45,7 @@ export async function getUser(walletAddress: string): Promise<UserData | null> {
 /**
  * Award points for coin flip
  */
-export async function awardFlipPoints(walletAddress: string): Promise<{ success: boolean; points?: number; pointsAwarded?: number; message?: string }> {
+export async function awardFlipPoints(walletAddress: string): Promise<{ success: boolean; points?: number; pointsAwarded?: number; message?: string; isFirstFlip?: boolean }> {
   try {
     const response = await fetch(`${API_BASE_URL}/users/${walletAddress}/flip`, {
       method: 'POST',
@@ -59,7 +59,8 @@ export async function awardFlipPoints(walletAddress: string): Promise<{ success:
       success: data.success,
       points: data.points,
       pointsAwarded: data.pointsAwarded,
-      message: data.message
+      message: data.message,
+      isFirstFlip: data.isFirstFlip
     };
   } catch (error) {
     console.error('Error awarding flip points:', error);
