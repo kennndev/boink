@@ -31,10 +31,17 @@ interface ReferralStats {
   active: boolean;
 }
 
+interface PointsStats {
+  address: string;
+  points: number;
+  flips: number;
+}
+
 export const Leaderboard = ({ connectedWallet, connectedWalletName, walletProviders }: LeaderboardProps) => {
-  const [activeTab, setActiveTab] = useState<"onchain" | "referrals">("onchain");
+  const [activeTab, setActiveTab] = useState<"onchain" | "referrals" | "points">("onchain");
   const [players, setPlayers] = useState<PlayerStats[]>([]);
   const [referrals, setReferrals] = useState<ReferralStats[]>([]);
+  const [points, setPoints] = useState<PointsStats[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [sortBy, setSortBy] = useState<"wins" | "plays" | "winRate">("wins");
@@ -46,7 +53,51 @@ export const Leaderboard = ({ connectedWallet, connectedWalletName, walletProvid
   const REFERRAL_REGISTRY_ADDRESS = import.meta.env.VITE_REFERRAL_REGISTORY_ADDRESS || "";
   const EXPECTED_CHAIN_ID = import.meta.env.VITE_CHAIN_ID || "763373";
 
+  const loadPointsLeaderboard = async () => {
+    try {
+      setLoading(true);
+      setError(null);
+      console.log("📊 Loading points leaderboard from database...");
+
+      // Fetch points leaderboard from database
+      const leaderboardData = await getLeaderboard(100).catch((error) => {
+        // Handle network errors more gracefully
+        if (error instanceof TypeError && error.message.includes('Failed to fetch')) {
+          throw new Error("Unable to connect to the server. Please check your connection or try again later.");
+        }
+        throw error;
+      });
+      
+      const pointsStats: PointsStats[] = leaderboardData
+        .filter((user) => user.points > 0) // Only show users with points
+        .map((user) => ({
+          address: user.walletAddress,
+          points: user.points,
+          flips: user.flips || 0,
+        }));
+
+      // Sort by points (descending) - already sorted by backend, but ensure it
+      const sorted = [...pointsStats].sort((a, b) => b.points - a.points);
+
+      console.log(`✅ Loaded ${sorted.length} users with points from database`);
+      setPoints(sorted);
+    } catch (e: any) {
+      console.error("❌ Error loading points leaderboard:", e);
+      const errorMessage = e?.message || "Failed to load points leaderboard";
+      setError(errorMessage);
+      setPoints([]); // Clear points on error
+    } finally {
+      setLoading(false);
+    }
+  };
+
   useEffect(() => {
+    // Points leaderboard doesn't require wallet connection
+    if (activeTab === "points") {
+      loadPointsLeaderboard();
+      return;
+    }
+
     if (connectedWallet && CONTRACT_ADDRESS) {
       // Get provider by wallet name, or fallback to window.ethereum
       const walletName = connectedWalletName || "MetaMask"; // Default to MetaMask if not specified
@@ -91,7 +142,7 @@ export const Leaderboard = ({ connectedWallet, connectedWalletName, walletProvid
           // Load leaderboard data based on active tab
           if (activeTab === "onchain") {
             await loadLeaderboard(coinFlipContract, browserProvider);
-          } else {
+          } else if (activeTab === "referrals") {
             await loadReferralLeaderboard(referralRegContract, browserProvider);
           }
         } catch (e: any) {
@@ -107,6 +158,11 @@ export const Leaderboard = ({ connectedWallet, connectedWalletName, walletProvid
 
   // Reload when tab changes
   useEffect(() => {
+    if (activeTab === "points") {
+      loadPointsLeaderboard();
+      return;
+    }
+    
     if (!provider) return;
     
     if (activeTab === "onchain" && contract) {
@@ -473,7 +529,11 @@ export const Leaderboard = ({ connectedWallet, connectedWalletName, walletProvid
           🏆 LEADERBOARD 🏆
         </h2>
         <p className="text-xs sm:text-sm font-retro text-muted-foreground">
-          {activeTab === "onchain" ? "Top players ranked by their performance" : "Top referrers ranked by referral points"}
+          {activeTab === "onchain" 
+            ? "Top players ranked by their performance" 
+            : activeTab === "referrals"
+            ? "Top referrers ranked by referral points"
+            : "Top players ranked by database points"}
         </p>
       </div>
 
@@ -481,7 +541,7 @@ export const Leaderboard = ({ connectedWallet, connectedWalletName, walletProvid
       <div className="win98-border-inset p-2 sm:p-3 bg-secondary">
         <div className="flex gap-2">
           <button
-            className={`win98-border px-3 sm:px-4 py-1.5 sm:py-2 text-xs sm:text-sm font-pixel flex-1 ${
+            className={`win98-border px-2 sm:px-3 py-1.5 sm:py-2 text-xs sm:text-sm font-pixel flex-1 ${
               activeTab === "onchain"
                 ? "bg-blue-500 text-white font-bold"
                 : "bg-gray-200 text-gray-800 hover:bg-gray-300"
@@ -491,7 +551,7 @@ export const Leaderboard = ({ connectedWallet, connectedWalletName, walletProvid
             🎮 Onchain Stats
           </button>
           <button
-            className={`win98-border px-3 sm:px-4 py-1.5 sm:py-2 text-xs sm:text-sm font-pixel flex-1 ${
+            className={`win98-border px-2 sm:px-3 py-1.5 sm:py-2 text-xs sm:text-sm font-pixel flex-1 ${
               activeTab === "referrals"
                 ? "bg-blue-500 text-white font-bold"
                 : "bg-gray-200 text-gray-800 hover:bg-gray-300"
@@ -499,6 +559,16 @@ export const Leaderboard = ({ connectedWallet, connectedWalletName, walletProvid
             onClick={() => setActiveTab("referrals")}
           >
             🔗 Referrals
+          </button>
+          <button
+            className={`win98-border px-2 sm:px-3 py-1.5 sm:py-2 text-xs sm:text-sm font-pixel flex-1 ${
+              activeTab === "points"
+                ? "bg-blue-500 text-white font-bold"
+                : "bg-gray-200 text-gray-800 hover:bg-gray-300"
+            }`}
+            onClick={() => setActiveTab("points")}
+          >
+            ⭐ Points
           </button>
         </div>
       </div>
@@ -541,6 +611,100 @@ export const Leaderboard = ({ connectedWallet, connectedWalletName, walletProvid
         <div className="win98-border-inset p-6 sm:p-8 bg-secondary text-center">
           <p className="text-sm sm:text-lg font-pixel text-gray-600">Loading leaderboard...</p>
         </div>
+      ) : activeTab === "points" ? (
+        // Points Leaderboard
+        points.length === 0 ? (
+          <div className="win98-border-inset p-6 sm:p-8 bg-secondary text-center">
+            <p className="text-sm sm:text-lg font-pixel text-gray-600">No players with points found yet. Be the first!</p>
+          </div>
+        ) : (
+          <>
+            {/* Desktop Table View */}
+            <div className="hidden sm:block win98-border-inset p-2 sm:p-4 bg-secondary">
+              <div className="overflow-x-auto">
+                <table className="w-full table-fixed">
+                  <colgroup>
+                    <col className="w-16" />
+                    <col className="w-40" />
+                    <col className="w-32" />
+                    <col className="w-24" />
+                  </colgroup>
+                  <thead>
+                    <tr className="border-b-2 border-gray-400">
+                      <th className="text-left text-gray-600 p-2 font-pixel text-xs sm:text-sm">Rank</th>
+                      <th className="text-left text-gray-600 p-2 font-pixel text-xs sm:text-sm">Address</th>
+                      <th className="text-right text-gray-600 p-2 font-pixel text-xs sm:text-sm">Points</th>
+                      <th className="text-right text-gray-600 p-2 font-pixel text-xs sm:text-sm">Flips</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {points.map((point, index) => (
+                      <tr
+                        key={point.address}
+                        className={`border-b border-gray-300 ${
+                          connectedWallet?.toLowerCase() === point.address.toLowerCase()
+                            ? "bg-blue-100"
+                            : ""
+                        }`}
+                      >
+                        <td className="p-2 font-pixel text-xs sm:text-sm">
+                          {index === 0 ? "🥇" : index === 1 ? "🥈" : index === 2 ? "🥉" : `#${index + 1}`}
+                        </td>
+                        <td className="p-2 font-retro text-xs font-mono truncate text-gray-600">
+                          {formatAddress(point.address)}
+                        </td>
+                        <td className="p-2 font-pixel text-xs sm:text-sm text-right text-green-600 font-bold">
+                          {point.points.toLocaleString()}
+                        </td>
+                        <td className="p-2 font-pixel text-xs sm:text-sm text-right text-gray-800">
+                          {point.flips}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+
+            {/* Mobile Card View */}
+            <div className="sm:hidden space-y-2">
+              {points.map((point, index) => (
+                <div
+                  key={point.address}
+                  className={`win98-border-inset p-3 bg-secondary ${
+                    connectedWallet?.toLowerCase() === point.address.toLowerCase()
+                      ? "bg-blue-100"
+                      : ""
+                  }`}
+                >
+                  <div className="flex items-center justify-between mb-2">
+                    <div className="flex items-center gap-2">
+                      <span className="font-pixel text-base">
+                        {index === 0 ? "🥇" : index === 1 ? "🥈" : index === 2 ? "🥉" : `#${index + 1}`}
+                      </span>
+                      <span className="font-retro text-xs font-mono text-gray-600">
+                        {formatAddress(point.address)}
+                      </span>
+                    </div>
+                    {connectedWallet?.toLowerCase() === point.address.toLowerCase() && (
+                      <span className="text-xs font-pixel text-blue-600">(You)</span>
+                    )}
+                  </div>
+                  <div className="grid grid-cols-2 gap-2 text-xs">
+                    <div className="flex justify-between">
+                      <span className="font-retro text-gray-600">Points:</span>
+                      <span className="font-pixel text-green-600 font-bold">{point.points.toLocaleString()}</span>
+                    </div>
+                    <div className="flex justify-between">
+                      <span className="font-retro text-gray-600">Flips:</span>
+                      <span className="font-pixel text-green-600">{point.flips}</span>
+                    </div>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </>
+        )
       ) : activeTab === "referrals" ? (
         // Referral Leaderboard
         referrals.length === 0 ? (
@@ -754,7 +918,9 @@ export const Leaderboard = ({ connectedWallet, connectedWalletName, walletProvid
       {/* Info */}
       <div className="win98-border p-2 sm:p-3 bg-gray-100">
         <p className="text-[10px] sm:text-xs font-retro text-gray-700">
-          💡 Leaderboard data is fetched directly from the blockchain. Your address is highlighted in blue.
+          💡 {activeTab === "points" 
+            ? "Points leaderboard data is fetched from the database. Your address is highlighted in blue."
+            : "Leaderboard data is fetched directly from the blockchain. Your address is highlighted in blue."}
         </p>
       </div>
     </div>
