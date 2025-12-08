@@ -60,13 +60,7 @@ export const Leaderboard = ({ connectedWallet, connectedWalletName, walletProvid
       console.log("📊 Loading points leaderboard from database...");
 
       // Fetch points leaderboard from database
-      const leaderboardData = await getLeaderboard(100).catch((error) => {
-        // Handle network errors more gracefully
-        if (error instanceof TypeError && error.message.includes('Failed to fetch')) {
-          throw new Error("Unable to connect to the server. Please check your connection or try again later.");
-        }
-        throw error;
-      });
+      const leaderboardData = await getLeaderboard(100); // Get top 100 users
       
       const pointsStats: PointsStats[] = leaderboardData
         .filter((user) => user.points > 0) // Only show users with points
@@ -83,9 +77,7 @@ export const Leaderboard = ({ connectedWallet, connectedWalletName, walletProvid
       setPoints(sorted);
     } catch (e: any) {
       console.error("❌ Error loading points leaderboard:", e);
-      const errorMessage = e?.message || "Failed to load points leaderboard";
-      setError(errorMessage);
-      setPoints([]); // Clear points on error
+      setError(e?.message || "Failed to load points leaderboard");
     } finally {
       setLoading(false);
     }
@@ -538,20 +530,20 @@ export const Leaderboard = ({ connectedWallet, connectedWalletName, walletProvid
       </div>
 
       {/* Tabs */}
-      <div className="win98-border-inset p-2 sm:p-3 bg-secondary">
-        <div className="flex gap-2">
+      <div className="win98-border-inset p-1 sm:p-3 bg-secondary">
+        <div className="flex gap-0.5 sm:gap-2">
           <button
-            className={`win98-border px-2 sm:px-3 py-1.5 sm:py-2 text-xs sm:text-sm font-pixel flex-1 ${
+            className={`win98-border px-1 sm:px-3 py-0.5 sm:py-2 text-[5px] sm:text-sm font-pixel flex-1 min-w-0 truncate leading-tight ${
               activeTab === "onchain"
                 ? "bg-blue-500 text-white font-bold"
                 : "bg-gray-200 text-gray-800 hover:bg-gray-300"
             }`}
             onClick={() => setActiveTab("onchain")}
           >
-            🎮 Onchain Stats
+            🎮 <span className="hidden sm:inline">Onchain </span>Stats
           </button>
           <button
-            className={`win98-border px-2 sm:px-3 py-1.5 sm:py-2 text-xs sm:text-sm font-pixel flex-1 ${
+            className={`win98-border px-1 sm:px-3 py-0.5 sm:py-2 text-[5px] sm:text-sm font-pixel flex-1 min-w-0 truncate leading-tight ${
               activeTab === "referrals"
                 ? "bg-blue-500 text-white font-bold"
                 : "bg-gray-200 text-gray-800 hover:bg-gray-300"
@@ -561,7 +553,7 @@ export const Leaderboard = ({ connectedWallet, connectedWalletName, walletProvid
             🔗 Referrals
           </button>
           <button
-            className={`win98-border px-2 sm:px-3 py-1.5 sm:py-2 text-xs sm:text-sm font-pixel flex-1 ${
+            className={`win98-border px-1 sm:px-3 py-0.5 sm:py-2 text-[5px] sm:text-sm font-pixel flex-1 min-w-0 truncate leading-tight ${
               activeTab === "points"
                 ? "bg-blue-500 text-white font-bold"
                 : "bg-gray-200 text-gray-800 hover:bg-gray-300"
