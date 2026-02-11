@@ -428,39 +428,101 @@ export const NFTStaking = ({ connectedWallet, connectedWalletName, walletProvide
       setStaking(true);
       const tokenIds = Array.from(selectedNFTs);
 
+      // Small delay to let RPC settle
+      await sleep(300);
+
       const isApproved = await nftContract.isApprovedForAll(connectedWallet, STAKING_CONTRACT_ADDRESS);
       if (!isApproved) {
         toast({ title: "Approval Required", description: "Approving NFT contract..." });
-        const maxAttempts = 2;
+        const maxAttempts = 3;
         let approved = false;
         let lastError: any = null;
+
         for (let attempt = 1; attempt <= maxAttempts; attempt++) {
           try {
             const approveTx = await nftContract.setApprovalForAll(STAKING_CONTRACT_ADDRESS, true);
+            toast({ title: "Confirming...", description: "Waiting for approval confirmation..." });
             await approveTx.wait();
             approved = true;
             break;
-          } catch (err) {
+          } catch (err: any) {
             lastError = err;
+
+            // User rejected the transaction
+            if (err?.code === 4001 || err?.code === "ACTION_REJECTED") {
+              toast({
+                variant: "destructive",
+                title: "Transaction Rejected",
+                description: "You rejected the approval transaction."
+              });
+              throw err;
+            }
+
+            console.error(`Approval attempt ${attempt} failed:`, err);
+
+            // Retry with exponential backoff
             if (attempt < maxAttempts) {
-              await sleep(1200);
+              const delay = attempt * 1000; // 1s, 2s
+              toast({
+                title: "Retrying...",
+                description: `Network error, retrying in ${delay / 1000}s... (${attempt}/${maxAttempts})`
+              });
+              await sleep(delay);
             }
           }
         }
+
         if (!approved) {
           toast({
             variant: "destructive",
             title: "Approval Failed",
-            description: "RPC error while approving. Please try again."
+            description: "Network error after multiple attempts. Please try again."
           });
-          throw lastError || new Error("Approval failed");
+          throw lastError || new Error("Approval failed after retries");
         }
-        toast({ title: "Approved", description: "NFT contract approved" });
+
+        toast({ title: "Approved!", description: "NFT contract approved successfully" });
+        await sleep(500); // Let approval propagate
       }
 
       toast({ title: "Staking NFTs", description: `Staking ${tokenIds.length} NFT(s)...` });
-      const stakeTx = await stakingContract.stake(tokenIds);
-      await stakeTx.wait();
+
+      // Retry logic for staking transaction (RPC can be flaky)
+      let staked = false;
+      const maxStakeAttempts = 3;
+      let lastStakeError: any = null;
+
+      for (let attempt = 1; attempt <= maxStakeAttempts; attempt++) {
+        try {
+          const stakeTx = await stakingContract.stake(tokenIds);
+          await stakeTx.wait();
+          staked = true;
+          break;
+        } catch (err: any) {
+          lastStakeError = err;
+
+          // User rejected the transaction
+          if (err?.code === 4001 || err?.code === "ACTION_REJECTED") {
+            throw err;
+          }
+
+          console.error(`Staking attempt ${attempt} failed:`, err);
+
+          // Retry with exponential backoff
+          if (attempt < maxStakeAttempts) {
+            const delay = attempt * 1000; // 1s, 2s
+            toast({
+              title: "Network Error",
+              description: `Retrying staking in ${delay / 1000}s... (${attempt}/${maxStakeAttempts})`
+            });
+            await sleep(delay);
+          }
+        }
+      }
+
+      if (!staked) {
+        throw lastStakeError || new Error("Staking failed after multiple attempts");
+      }
 
       toast({ title: "Staked!", description: `Successfully staked ${tokenIds.length} NFT(s)` });
 
@@ -480,7 +542,20 @@ export const NFTStaking = ({ connectedWallet, connectedWalletName, walletProvide
     { /* window.location.reload(); */ }
     } catch (e: any) {
       console.error("Staking error:", e);
-      toast({ variant: "destructive", title: "Staking Failed", description: e?.message || "Failed to stake NFTs" });
+
+      // Don't show error toast if user rejected
+      if (e?.code !== 4001 && e?.code !== "ACTION_REJECTED") {
+        const errorMsg = e?.message || "Failed to stake NFTs";
+        const userFriendlyMsg = errorMsg.includes("RPC") || errorMsg.includes("client error")
+          ? "Network error occurred. Please try again."
+          : errorMsg;
+
+        toast({
+          variant: "destructive",
+          title: "Staking Failed",
+          description: userFriendlyMsg
+        });
+      }
     } finally {
       setStaking(false);
     }
