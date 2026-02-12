@@ -494,13 +494,80 @@ const Index = () => {
           // Store both the wallet address and name
           const walletAddress = wcAccounts && wcAccounts.length > 0 ? wcAccounts[0] : null;
           if (walletAddress) {
+            // Check and switch to Ink chain if needed
+            const EXPECTED_CHAIN_ID = import.meta.env.VITE_CHAIN_ID || "57073";
+            const VITE_RPC_URL = "https://rpc-gel.inkonchain.com";
+
+            try {
+              // Get current chain ID
+              const chainId = await wcProvider.request({ method: 'eth_chainId' });
+              const currentChainId = parseInt(chainId as string, 16).toString();
+
+              if (currentChainId !== EXPECTED_CHAIN_ID) {
+                // Try to switch to Ink chain
+                try {
+                  await wcProvider.request({
+                    method: 'wallet_switchEthereumChain',
+                    params: [{ chainId: `0x${parseInt(EXPECTED_CHAIN_ID).toString(16)}` }],
+                  });
+
+                  toast({
+                    title: "Network Switched",
+                    description: "Switched to Ink chain successfully",
+                  });
+                } catch (switchError: any) {
+                  // Chain not added to wallet
+                  if (switchError.code === 4902) {
+                    try {
+                      await wcProvider.request({
+                        method: 'wallet_addEthereumChain',
+                        params: [
+                          {
+                            chainId: `0x${parseInt(EXPECTED_CHAIN_ID).toString(16)}`,
+                            chainName: 'Ink',
+                            nativeCurrency: {
+                              name: 'Ethereum',
+                              symbol: 'ETH',
+                              decimals: 18,
+                            },
+                            rpcUrls: [VITE_RPC_URL],
+                            blockExplorerUrls: ['https://explorer.inkonchain.com/'],
+                          },
+                        ],
+                      });
+
+                      toast({
+                        title: "Network Added",
+                        description: "Ink chain added and switched successfully",
+                      });
+                    } catch (addError: any) {
+                      console.error("Error adding Ink chain:", addError);
+                      toast({
+                        variant: "destructive",
+                        title: "Network Add Failed",
+                        description: "Failed to add Ink network. Please add it manually.",
+                      });
+                    }
+                  } else if (switchError.code === 4001) {
+                    // User rejected the switch
+                    toast({
+                      title: "Network Switch Required",
+                      description: "Please switch to Ink network to use all features",
+                    });
+                  }
+                }
+              }
+            } catch (error) {
+              console.error("Error checking/switching network:", error);
+            }
+
             setConnectedWallet(walletAddress);
             setConnectedWalletName("WalletConnect");
-            
+
             // Save to localStorage for persistence
             localStorage.setItem('coinflip_connectedWallet', walletAddress);
             localStorage.setItem('coinflip_connectedWalletName', "WalletConnect");
-            
+
             setShowWalletModal(false);
             toast({
               title: "Wallet Connected",
@@ -771,18 +838,91 @@ const Index = () => {
       accounts = await provider.request({
         method: "eth_requestAccounts",
       });
-      
-      
+
+
       if (accounts.length > 0) {
+        // Check and switch to Ink chain if needed
+        const EXPECTED_CHAIN_ID = import.meta.env.VITE_CHAIN_ID || "57073";
+        const VITE_RPC_URL = "https://rpc-gel.inkonchain.com";
+
+        try {
+          // Get current chain ID
+          const chainId = await provider.request({ method: 'eth_chainId' });
+          const currentChainId = parseInt(chainId as string, 16).toString();
+
+          if (currentChainId !== EXPECTED_CHAIN_ID) {
+            // Try to switch to Ink chain
+            try {
+              await provider.request({
+                method: 'wallet_switchEthereumChain',
+                params: [{ chainId: `0x${parseInt(EXPECTED_CHAIN_ID).toString(16)}` }],
+              });
+
+              toast({
+                title: "Network Switched",
+                description: "Switched to Ink chain successfully",
+              });
+            } catch (switchError: any) {
+              // Chain not added to wallet
+              if (switchError.code === 4902) {
+                try {
+                  await provider.request({
+                    method: 'wallet_addEthereumChain',
+                    params: [
+                      {
+                        chainId: `0x${parseInt(EXPECTED_CHAIN_ID).toString(16)}`,
+                        chainName: 'Ink',
+                        nativeCurrency: {
+                          name: 'Ethereum',
+                          symbol: 'ETH',
+                          decimals: 18,
+                        },
+                        rpcUrls: [VITE_RPC_URL],
+                        blockExplorerUrls: ['https://explorer.inkonchain.com/'],
+                      },
+                    ],
+                  });
+
+                  toast({
+                    title: "Network Added",
+                    description: "Ink chain added and switched successfully",
+                  });
+                } catch (addError: any) {
+                  console.error("Error adding Ink chain:", addError);
+                  toast({
+                    variant: "destructive",
+                    title: "Network Add Failed",
+                    description: "Failed to add Ink network. Please add it manually.",
+                  });
+                }
+              } else if (switchError.code === 4001) {
+                // User rejected the switch
+                toast({
+                  title: "Network Switch Required",
+                  description: "Please switch to Ink network to use all features",
+                });
+              } else {
+                console.error("Error switching network:", switchError);
+                toast({
+                  title: "Network Switch Failed",
+                  description: "Please switch to Ink network manually",
+                });
+              }
+            }
+          }
+        } catch (error) {
+          console.error("Error checking/switching network:", error);
+        }
+
         // Store both the wallet address and name
         const walletAddress = accounts[0];
         setConnectedWallet(walletAddress);
         setConnectedWalletName(walletName);
-        
+
         // Save to localStorage for persistence
         localStorage.setItem('coinflip_connectedWallet', walletAddress);
         localStorage.setItem('coinflip_connectedWalletName', walletName);
-        
+
         setShowWalletModal(false);
         toast({
           title: "Wallet Connected",
@@ -1600,13 +1740,80 @@ const Index = () => {
               // Store both the wallet address and name
               const walletAddress = accounts && accounts.length > 0 ? accounts[0] : null;
               if (walletAddress) {
+                // Check and switch to Ink chain if needed
+                const EXPECTED_CHAIN_ID = import.meta.env.VITE_CHAIN_ID || "57073";
+                const VITE_RPC_URL = "https://rpc-gel.inkonchain.com";
+
+                try {
+                  // Get current chain ID
+                  const chainId = await provider.request({ method: 'eth_chainId' });
+                  const currentChainId = parseInt(chainId as string, 16).toString();
+
+                  if (currentChainId !== EXPECTED_CHAIN_ID) {
+                    // Try to switch to Ink chain
+                    try {
+                      await provider.request({
+                        method: 'wallet_switchEthereumChain',
+                        params: [{ chainId: `0x${parseInt(EXPECTED_CHAIN_ID).toString(16)}` }],
+                      });
+
+                      toast({
+                        title: "Network Switched",
+                        description: "Switched to Ink chain successfully",
+                      });
+                    } catch (switchError: any) {
+                      // Chain not added to wallet
+                      if (switchError.code === 4902) {
+                        try {
+                          await provider.request({
+                            method: 'wallet_addEthereumChain',
+                            params: [
+                              {
+                                chainId: `0x${parseInt(EXPECTED_CHAIN_ID).toString(16)}`,
+                                chainName: 'Ink',
+                                nativeCurrency: {
+                                  name: 'Ethereum',
+                                  symbol: 'ETH',
+                                  decimals: 18,
+                                },
+                                rpcUrls: [VITE_RPC_URL],
+                                blockExplorerUrls: ['https://explorer.inkonchain.com/'],
+                              },
+                            ],
+                          });
+
+                          toast({
+                            title: "Network Added",
+                            description: "Ink chain added and switched successfully",
+                          });
+                        } catch (addError: any) {
+                          console.error("Error adding Ink chain:", addError);
+                          toast({
+                            variant: "destructive",
+                            title: "Network Add Failed",
+                            description: "Failed to add Ink network. Please add it manually.",
+                          });
+                        }
+                      } else if (switchError.code === 4001) {
+                        // User rejected the switch
+                        toast({
+                          title: "Network Switch Required",
+                          description: "Please switch to Ink network to use all features",
+                        });
+                      }
+                    }
+                  }
+                } catch (error) {
+                  console.error("Error checking/switching network:", error);
+                }
+
                 setConnectedWallet(walletAddress);
                 setConnectedWalletName("WalletConnect");
-                
+
                 // Save to localStorage for persistence
                 localStorage.setItem('coinflip_connectedWallet', walletAddress);
                 localStorage.setItem('coinflip_connectedWalletName', "WalletConnect");
-                
+
                 setShowWalletModal(false);
                 toast({
                   title: "Wallet Connected",
