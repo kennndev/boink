@@ -1036,21 +1036,6 @@ const Index = () => {
         title: "Coin Flip",
         body: (
           <div className="space-y-1.5 sm:space-y-4">
-            <div className="text-center space-y-2 sm:space-y-4">
-              <h2 className="text-base sm:text-2xl font-bold font-military text-gradient-emerald">
-                ???? Coin Flip ????
-              </h2>
-              <p className="text-xs sm:text-base font-cyber text-gradient-red">
-                Mainnet coming soon...
-              </p>
-              <div className="win98-border p-2 sm:p-4 bg-secondary">
-                <p className="text-center text-gradient-cyan text-xs sm:text-lg font-pixel">Stay tuned</p>
-                <p className="text-center text-gradient-cyan text-[10px] sm:text-sm mt-1.5 sm:mt-2 font-retro">
-                  We are preparing the mainnet release.
-                </p>
-              </div>
-            </div>
-            {/*
             {connectedWallet ? (
               <CoinFlip 
                 connectedWallet={connectedWallet} 
@@ -1073,7 +1058,6 @@ const Index = () => {
                 </div>
               </div>
             )}
-            */}
           </div>
         ),
       },
