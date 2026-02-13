@@ -16,11 +16,14 @@ interface UserStats {
 }
 
 export const CoinFlip = ({ connectedWallet, connectedWalletName, walletProviders }: CoinFlipProps) => {
+  const MIN_BET_USDC = 0.5;
+  const MAX_BET_USDC = 10;
+  const QUICK_BETS = [0.5, 3, 10];
   const [selectedSide, setSelectedSide] = useState<"heads" | "tails" | null>(null);
   const [isFlipping, setIsFlipping] = useState(false);
   const [showAnimation, setShowAnimation] = useState(false);
   const [animationResult, setAnimationResult] = useState<"heads" | "tails" | null>(null);
-  const [selectedBetUsd, setSelectedBetUsd] = useState<1 | 5 | 10>(1);
+  const [selectedBetUsd, setSelectedBetUsd] = useState<number>(MIN_BET_USDC);
   const [lastResult, setLastResult] = useState<{
     guess: "heads" | "tails";
     outcome: "heads" | "tails";
@@ -1407,24 +1410,6 @@ export const CoinFlip = ({ connectedWallet, connectedWalletName, walletProviders
           </div>
         </div>
       )}
-
-      {/* Oracle Status Warning */}
-      {oracleStatus && !oracleStatus.configured && (
-        <div className="win98-border bg-yellow-100 p-3 border-yellow-500">
-          <div className="flex items-center gap-2">
-            <span className="text-2xl">⚠️</span>
-            <div className="flex-1">
-              <p className="font-pixel text-yellow-700 text-sm font-bold">Oracle Service Required</p>
-              <p className="font-retro text-yellow-600 text-xs">
-                {oracleStatus.pendingBets > 0 
-                  ? `There ${oracleStatus.pendingBets === 1 ? 'is' : 'are'} ${oracleStatus.pendingBets} pending bet${oracleStatus.pendingBets === 1 ? '' : 's'}. The oracle service needs to be running to resolve bets.`
-                  : 'The oracle service is not configured. Start it with: npm run dev:oracle'}
-              </p>
-            </div>
-          </div>
-        </div>
-      )}
-
       {/* User Stats */}
       <div className="win98-border-inset p-4 bg-secondary">
         <h3 className="text-lg font-bold font-military text-gradient-blue mb-3">
@@ -1445,23 +1430,51 @@ export const CoinFlip = ({ connectedWallet, connectedWalletName, walletProviders
         <div className="mb-4">
           <div className="text-sm font-retro text-gray-700 mb-2">Choose Bet (USDC)</div>
           <div className="flex gap-2 justify-center">
-            {[1,5,10].map((n) => (
+            {QUICK_BETS.map((n) => (
               <button
                 key={n}
                 className={`win98-border px-2 py-1 text-xs font-pixel ${selectedBetUsd === n ? 'bg-emerald-500 text-white' : 'bg-gray-200 text-gray-800 hover:bg-gray-300'}`}
-                onClick={() => setSelectedBetUsd(n as 1|5|10)}
+                onClick={() => setSelectedBetUsd(n)}
                 disabled={isFlipping}
               >
                 ${n}
               </button>
             ))}
           </div>
+          <div className="mt-2 flex items-center justify-center gap-2">
+            <label className="text-xs font-retro text-gray-700" htmlFor="custom-bet-usdc">
+              Custom:
+            </label>
+            <input
+              id="custom-bet-usdc"
+              type="number"
+              inputMode="decimal"
+              min={MIN_BET_USDC}
+              max={MAX_BET_USDC}
+              step="0.1"
+              value={selectedBetUsd}
+              onChange={(event) => {
+                const raw = Number(event.target.value);
+                if (Number.isNaN(raw)) {
+                  return;
+                }
+                const clamped = Math.min(MAX_BET_USDC, Math.max(MIN_BET_USDC, raw));
+                setSelectedBetUsd(Number(clamped.toFixed(2)));
+              }}
+              className="win98-border px-2 py-1 text-xs font-pixel w-24 bg-white text-gray-900"
+              disabled={isFlipping}
+            />
+            <span className="text-[10px] font-retro text-gray-600">USDC</span>
+          </div>
+          <div className="text-center text-[10px] mt-1 font-retro text-gray-500">
+            Min: {MIN_BET_USDC} • Max: {MAX_BET_USDC} USDC
+          </div>
           <div className="text-center text-xs mt-2 font-retro text-muted-foreground">
             Potential payout: <span className="font-bold text-green-600">{expectedPayout}</span> USDC
           </div>
           {maxBetUnits && (
             <div className="text-center text-[10px] mt-1 font-retro text-gray-500">
-              Max bet: $5
+              Max bet: ${MAX_BET_USDC}
             </div>
           )}
         </div>
@@ -1728,3 +1741,4 @@ export const CoinFlip = ({ connectedWallet, connectedWalletName, walletProviders
     </div>
   );
 };
+
