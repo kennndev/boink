@@ -5,6 +5,33 @@ import { User } from '../../server/models/User.js';
 import { Staking } from '../../server/models/Staking.js';
 import { getPendingPoints, distributeStakingPoints } from '../../server/jobs/dailyPointsDistribution.js';
 
+const CRON_CHAIN_SECRET = process.env.CRON_CHAIN_SECRET || '';
+const CHAINED_CRON_ENABLED = process.env.CHAINED_CRON_ENABLED === 'true';
+const CHAINED_CRON_MAX_HOPS = Number.parseInt(process.env.CHAINED_CRON_MAX_HOPS || '20', 10);
+
+function getBaseUrl(req) {
+  if (process.env.FRONTEND_URL) return process.env.FRONTEND_URL;
+  if (process.env.VERCEL_URL) return `https://${process.env.VERCEL_URL}`;
+  const host = req.headers['x-forwarded-host'] || req.headers.host;
+  const proto = req.headers['x-forwarded-proto'] || 'https';
+  return `${proto}://${host}`;
+}
+
+async function triggerNextBatch(req, hop) {
+  const baseUrl = getBaseUrl(req);
+  const url = `${baseUrl}/api/staking/distribute-points?chain=1&hop=${hop + 1}`;
+  const headers = {};
+  if (CRON_CHAIN_SECRET) {
+    headers['x-cron-secret'] = CRON_CHAIN_SECRET;
+  }
+  try {
+    await fetch(url, { method: 'GET', headers });
+    console.log(`[Daily Points] Triggered next batch: ${url}`);
+  } catch (error) {
+    console.error('[Daily Points] Failed to trigger next batch:', error);
+  }
+}
+
 // MongoDB connection with serverless optimization
 let cachedDb = null;
 
@@ -76,7 +103,25 @@ export default async (req, res) => {
   // Route: GET/POST /distribute-points (Vercel Cron uses GET by default)
   if ((req.method === 'POST' || req.method === 'GET') && (pathParts[0] === 'distribute-points' || path === '/distribute-points')) {
     try {
+      if (CRON_CHAIN_SECRET) {
+        const provided = req.headers['x-cron-secret'];
+        if (!provided || provided !== CRON_CHAIN_SECRET) {
+          return res.status(401).json({ success: false, message: 'Unauthorized' });
+        }
+      }
+
+      const hop = Number.parseInt(req.query?.hop || '0', 10);
       const result = await distributeStakingPoints();
+
+      if (
+        CHAINED_CRON_ENABLED &&
+        result?.hasMore &&
+        Number.isFinite(hop) &&
+        hop < CHAINED_CRON_MAX_HOPS
+      ) {
+        await triggerNextBatch(req, hop);
+      }
+
       return res.status(200).json({
         success: result.success,
         message: result.success
