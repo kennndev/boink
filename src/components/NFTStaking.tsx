@@ -38,7 +38,9 @@ const STAKING_ABI = [
 
 export const NFTStaking = ({ connectedWallet, connectedWalletName, walletProviders }: NFTStakingProps) => {
   const [nftContract, setNftContract] = useState<ethers.Contract | null>(null);
+  const [nftReadContract, setNftReadContract] = useState<ethers.Contract | null>(null);
   const [stakingContract, setStakingContract] = useState<ethers.Contract | null>(null);
+  const [stakingReadContract, setStakingReadContract] = useState<ethers.Contract | null>(null);
   const [provider, setProvider] = useState<ethers.BrowserProvider | null>(null);
 
   const [userNFTs, setUserNFTs] = useState<NFT[]>([]);
@@ -102,14 +104,21 @@ export const NFTStaking = ({ connectedWallet, connectedWalletName, walletProvide
 
         const walletSigner = await browserProvider.getSigner();
 
+        // Use a static JsonRpcProvider for read-only calls to avoid wallet RPC issues with proxy contracts
+        const readProvider = new ethers.JsonRpcProvider(VITE_RPC_URL, Number(EXPECTED_CHAIN_ID));
+
         const nft = new ethers.Contract(NFT_CONTRACT_ADDRESS, ERC721_ABI, walletSigner);
+        const nftRead = new ethers.Contract(NFT_CONTRACT_ADDRESS, ERC721_ABI, readProvider);
         const stakingC = new ethers.Contract(STAKING_CONTRACT_ADDRESS, STAKING_ABI, walletSigner);
+        const stakingRead = new ethers.Contract(STAKING_CONTRACT_ADDRESS, STAKING_ABI, readProvider);
 
         setProvider(browserProvider);
         setNftContract(nft);
+        setNftReadContract(nftRead);
         setStakingContract(stakingC);
+        setStakingReadContract(stakingRead);
 
-        await loadData(nft, stakingC, connectedWallet, browserProvider);
+        await loadData(nftRead, stakingRead, connectedWallet, browserProvider);
       } catch (e: any) {
         console.error("Error initializing contracts:", e);
         setError(e?.message || "Failed to initialize contracts");
@@ -404,8 +413,8 @@ export const NFTStaking = ({ connectedWallet, connectedWalletName, walletProvide
   };
 
   const refreshData = async () => {
-    if (nftContract && stakingContract && connectedWallet && provider) {
-      await loadData(nftContract, stakingContract, connectedWallet, provider);
+    if (nftReadContract && stakingReadContract && connectedWallet && provider) {
+      await loadData(nftReadContract, stakingReadContract, connectedWallet, provider);
     }
   };
 
@@ -431,7 +440,7 @@ export const NFTStaking = ({ connectedWallet, connectedWalletName, walletProvide
       // Small delay to let RPC settle
       await sleep(300);
 
-      const isApproved = await nftContract.isApprovedForAll(connectedWallet, STAKING_CONTRACT_ADDRESS);
+      const isApproved = await (nftReadContract || nftContract).isApprovedForAll(connectedWallet, STAKING_CONTRACT_ADDRESS);
       if (!isApproved) {
         toast({ title: "Approval Required", description: "Approving NFT contract..." });
         const maxAttempts = 3;
