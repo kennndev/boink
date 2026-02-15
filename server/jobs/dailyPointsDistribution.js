@@ -124,12 +124,16 @@ export async function distributeStakingPoints() {
     }
 
     let walletsToProcess = uniqueWallets;
+    let nextCursorIndex = 0;
+    let batchingEnabled = false;
     if (Number.isFinite(MAX_WALLETS_PER_RUN) && MAX_WALLETS_PER_RUN > 0 && MAX_WALLETS_PER_RUN < uniqueWallets.length) {
+      batchingEnabled = true;
       walletsToProcess = uniqueWallets.slice(batchStartIndex, batchStartIndex + MAX_WALLETS_PER_RUN);
       const nextIndex = batchStartIndex + walletsToProcess.length;
+      nextCursorIndex = nextIndex >= uniqueWallets.length ? 0 : nextIndex;
       await StakingMeta.findOneAndUpdate(
         { key: 'daily_points_cursor' },
-        { value: { index: nextIndex >= uniqueWallets.length ? 0 : nextIndex } },
+        { value: { index: nextCursorIndex } },
         { upsert: true, new: true }
       );
       console.log(`[Daily Points] Processing batch ${batchStartIndex}..${batchStartIndex + walletsToProcess.length - 1} (max ${MAX_WALLETS_PER_RUN})`);
@@ -230,6 +234,11 @@ export async function distributeStakingPoints() {
       success: true,
       processed: walletsProcessed,
       totalPointsDistributed,
+      batching: batchingEnabled,
+      totalWallets: uniqueWallets.length,
+      batchSize: walletsToProcess.length,
+      nextCursorIndex,
+      hasMore: batchingEnabled && nextCursorIndex !== 0,
       timestamp: new Date().toISOString()
     };
   } catch (error) {
