@@ -1,6 +1,7 @@
 import { ethers } from 'ethers';
 import { User } from '../models/User.js';
 import { Staking } from '../models/Staking.js';
+import { StakingMeta } from '../models/StakingMeta.js';
 
 const POINTS_PER_NFT_PER_DAY = 100;
 
@@ -12,6 +13,7 @@ const STAKING_ABI = [
 const STAKING_CONTRACT_ADDRESS = process.env.VITE_STAKING_CONTRACT_ADDRESS || "";
 const RPC_URL = process.env.VITE_RPC_URL || "https://rpc-gel-sepolia.inkonchain.com";
 const SYNC_ONCHAIN_BEFORE_DISTRIBUTION = process.env.STAKING_SYNC_BEFORE_DISTRIBUTION === 'true';
+const MAX_WALLETS_PER_RUN = Number.parseInt(process.env.MAX_WALLETS_PER_RUN || '50', 10);
 
 function getStakingContract() {
   const provider = new ethers.JsonRpcProvider(RPC_URL);
@@ -98,13 +100,46 @@ export async function distributeStakingPoints() {
     allUsers.forEach(u => walletSet.add(u.walletAddress));
     allStakingRecords.forEach(s => walletSet.add(s.walletAddress));
 
-    const uniqueWallets = Array.from(walletSet);
+    const uniqueWallets = Array.from(walletSet).filter(Boolean).sort();
 
     console.log(`[Daily Points] Found ${uniqueWallets.length} unique wallets to check (${allUsers.length} users, ${new Set(allStakingRecords.map(s => s.walletAddress)).size} with staking history)`);
 
+    if (uniqueWallets.length === 0) {
+      console.log('[Daily Points] No wallets found');
+      return {
+        success: true,
+        processed: 0,
+        totalPointsDistributed: 0
+      };
+    }
+
+    // Batch selection with persistent cursor
+    let batchStartIndex = 0;
+    if (Number.isFinite(MAX_WALLETS_PER_RUN) && MAX_WALLETS_PER_RUN > 0 && MAX_WALLETS_PER_RUN < uniqueWallets.length) {
+      const cursor = await StakingMeta.findOne({ key: 'daily_points_cursor' });
+      batchStartIndex = cursor?.value?.index ?? 0;
+      if (batchStartIndex >= uniqueWallets.length) {
+        batchStartIndex = 0;
+      }
+    }
+
+    let walletsToProcess = uniqueWallets;
+    if (Number.isFinite(MAX_WALLETS_PER_RUN) && MAX_WALLETS_PER_RUN > 0 && MAX_WALLETS_PER_RUN < uniqueWallets.length) {
+      walletsToProcess = uniqueWallets.slice(batchStartIndex, batchStartIndex + MAX_WALLETS_PER_RUN);
+      const nextIndex = batchStartIndex + walletsToProcess.length;
+      await StakingMeta.findOneAndUpdate(
+        { key: 'daily_points_cursor' },
+        { value: { index: nextIndex >= uniqueWallets.length ? 0 : nextIndex } },
+        { upsert: true, new: true }
+      );
+      console.log(`[Daily Points] Processing batch ${batchStartIndex}..${batchStartIndex + walletsToProcess.length - 1} (max ${MAX_WALLETS_PER_RUN})`);
+    } else {
+      console.log('[Daily Points] Processing all wallets (no batching)');
+    }
+
     // Step 2: Sync each wallet's staking state from blockchain (optional)
     if (SYNC_ONCHAIN_BEFORE_DISTRIBUTION) {
-      for (const wallet of uniqueWallets) {
+      for (const wallet of walletsToProcess) {
         await syncUserStaking(wallet);
       }
     } else {
@@ -112,7 +147,10 @@ export async function distributeStakingPoints() {
     }
 
     // Step 3: Get all currently active staking records (after sync)
-    const activeStakes = await Staking.find({ isActive: true });
+    const activeStakes = await Staking.find({
+      isActive: true,
+      walletAddress: { $in: walletsToProcess }
+    });
 
     console.log(`[Daily Points] Found ${activeStakes.length} active staking records`);
 
