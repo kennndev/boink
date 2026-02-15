@@ -44,6 +44,7 @@ export const CoinFlip = ({ connectedWallet, connectedWalletName, walletProviders
   const [oracleStatus, setOracleStatus] = useState<{ configured: boolean; pendingBets: number } | null>(null);
   const [permitSupported, setPermitSupported] = useState<boolean>(false);
   const [hasPlaceBetWithPermit, setHasPlaceBetWithPermit] = useState<boolean>(false);
+  const [usdcBalance, setUsdcBalance] = useState<string | null>(null);
   const { toast } = useToast();
 
   // Contract addresses
@@ -266,6 +267,21 @@ export const CoinFlip = ({ connectedWallet, connectedWalletName, walletProviders
 
     }
   }, [connectedWallet, walletProviders, CONTRACT_ADDRESS, isContractConfigured, toast, isUsdcConfigured, USDC_ADDRESS]);
+
+  // Fetch USDC balance
+  const fetchUsdcBalance = async () => {
+    if (!usdcContract || !connectedWallet) return;
+    try {
+      const bal = await usdcContract.balanceOf(connectedWallet);
+      setUsdcBalance(ethers.formatUnits(bal, usdcDecimals));
+    } catch (e) {
+      console.error("Failed to fetch USDC balance:", e);
+    }
+  };
+
+  useEffect(() => {
+    fetchUsdcBalance();
+  }, [usdcContract, connectedWallet, usdcDecimals]);
 
   // Load decimals and payout preview when bet changes
   useEffect(() => {
@@ -1379,6 +1395,7 @@ export const CoinFlip = ({ connectedWallet, connectedWalletName, walletProviders
       setIsFlipping(false);
       setShowAnimation(false);
       setAnimationResult(null);
+      fetchUsdcBalance();
     }
   };
 
@@ -1426,6 +1443,15 @@ export const CoinFlip = ({ connectedWallet, connectedWalletName, walletProviders
           </div>
         ) : null}
         */}
+        {/* USDC Balance */}
+        {connectedWallet && usdcBalance !== null && (
+          <div className="mb-3 p-2 bg-gradient-to-r from-green-100 to-green-50 win98-border">
+            <div className="flex items-center justify-between">
+              <span className="text-sm font-pixel text-gray-700">USDC Balance:</span>
+              <span className="text-lg font-bold font-military text-green-600">{parseFloat(usdcBalance).toFixed(2)} USDC</span>
+            </div>
+          </div>
+        )}
         {/* Bet amount picker */}
         <div className="mb-4">
           <div className="text-sm font-retro text-gray-700 mb-2">Choose Bet (USDC)</div>
