@@ -73,8 +73,8 @@ export default async (req, res) => {
   const path = fullPath.replace('/api/staking', '') || '/';
   const pathParts = path.split('/').filter(Boolean);
 
-  // Route: POST /distribute-points
-  if (req.method === 'POST' && (pathParts[0] === 'distribute-points' || path === '/distribute-points')) {
+  // Route: GET/POST /distribute-points (Vercel Cron uses GET by default)
+  if ((req.method === 'POST' || req.method === 'GET') && (pathParts[0] === 'distribute-points' || path === '/distribute-points')) {
     try {
       const result = await distributeStakingPoints();
       return res.status(200).json({
