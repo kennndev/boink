@@ -103,11 +103,14 @@ export default async (req, res) => {
   // Route: GET/POST /distribute-points (Vercel Cron uses GET by default)
   if ((req.method === 'POST' || req.method === 'GET') && (pathParts[0] === 'distribute-points' || path === '/distribute-points')) {
     try {
-      if (CRON_CHAIN_SECRET) {
-        const provided = req.headers['x-cron-secret'];
-        if (!provided || provided !== CRON_CHAIN_SECRET) {
-          return res.status(401).json({ success: false, message: 'Unauthorized' });
-        }
+      // Verify cron auth: Vercel sends "Authorization: Bearer <CRON_SECRET>", chained calls send "x-cron-secret"
+      const vercelCronSecret = process.env.CRON_SECRET;
+      const authHeader = req.headers['authorization'];
+      const isVercelCron = vercelCronSecret && authHeader === `Bearer ${vercelCronSecret}`;
+      const isChainedCron = CRON_CHAIN_SECRET && req.headers['x-cron-secret'] === CRON_CHAIN_SECRET;
+
+      if (!isVercelCron && !isChainedCron) {
+        return res.status(401).json({ success: false, message: 'Unauthorized' });
       }
 
       const hop = Number.parseInt(req.query?.hop || '0', 10);
