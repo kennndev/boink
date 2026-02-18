@@ -40,7 +40,7 @@ async function connectToDatabase() {
     return cachedDb;
   }
 
-  const MONGODB_URI = process.env.MONGODB_URI || 'mongodb://localhost:27017/coinflip';
+  const MONGODB_URI = process.env.MONGODB_URI || '';
 
   try {
     const db = await mongoose.connect(MONGODB_URI, {
@@ -74,7 +74,7 @@ const STAKING_ABI = [
 ];
 
 const STAKING_CONTRACT_ADDRESS = process.env.VITE_STAKING_CONTRACT_ADDRESS || "";
-const RPC_URL = process.env.VITE_RPC_URL || "https://rpc-gel-sepolia.inkonchain.com";
+const RPC_URL = process.env.VITE_RPC_URL || "";
 const POINTS_PER_NFT_PER_DAY = 100;
 
 function getStakingContract() {
