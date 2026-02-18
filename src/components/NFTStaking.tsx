@@ -61,11 +61,11 @@ export const NFTStaking = ({ connectedWallet, connectedWalletName, walletProvide
   const [error, setError] = useState<string | null>(null);
   const { toast } = useToast();
 
-  const NFT_CONTRACT_ADDRESS = import.meta.env.VITE_NFT_CONTRACT_ADDRESS || "0x6De023BEA9EE6C99B69c5798C439eb92097A20e9";
-  const STAKING_CONTRACT_ADDRESS = import.meta.env.VITE_STAKING_CONTRACT_ADDRESS || "0xBE1F446338737E3A9d60fD0a71cf9C53f329E7dd";
+  const NFT_CONTRACT_ADDRESS = import.meta.env.VITE_NFT_CONTRACT_ADDRESS || "";
+  const STAKING_CONTRACT_ADDRESS = import.meta.env.VITE_STAKING_CONTRACT_ADDRESS || "";
   const EXPECTED_CHAIN_ID = import.meta.env.VITE_CHAIN_ID || "57073";
   const VITE_RPC_URL = "https://rpc-gel.inkonchain.com";
-  const API_URL = import.meta.env.VITE_API_URL || "https://boink-test.vercel.app";
+  const API_URL = import.meta.env.VITE_API_URL || "";
   const IPFS_GATEWAYS = [
     import.meta.env.VITE_IPFS_GATEWAY,
     "https://ipfs.io/ipfs/",
