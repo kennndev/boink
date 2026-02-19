@@ -17,19 +17,18 @@ function getBaseUrl(req) {
   return `${proto}://${host}`;
 }
 
-async function triggerNextBatch(req, hop) {
+function triggerNextBatch(req, hop) {
   const baseUrl = getBaseUrl(req);
   const url = `${baseUrl}/api/staking/distribute-points?chain=1&hop=${hop + 1}`;
   const headers = {};
   if (CRON_CHAIN_SECRET) {
     headers['x-cron-secret'] = CRON_CHAIN_SECRET;
   }
-  try {
-    await fetch(url, { method: 'GET', headers });
-    console.log(`[Daily Points] Triggered next batch: ${url}`);
-  } catch (error) {
-    console.error('[Daily Points] Failed to trigger next batch:', error);
-  }
+  // Fire-and-forget: do NOT await — waiting for the chained response
+  // holds this invocation open until the 60s Vercel timeout is hit.
+  fetch(url, { method: 'GET', headers })
+    .then(() => console.log(`[Daily Points] Triggered next batch: ${url}`))
+    .catch(error => console.error('[Daily Points] Failed to trigger next batch:', error));
 }
 
 // MongoDB connection with serverless optimization
@@ -116,22 +115,25 @@ export default async (req, res) => {
       const hop = Number.parseInt(req.query?.hop || '0', 10);
       const result = await distributeStakingPoints();
 
-      if (
-        CHAINED_CRON_ENABLED &&
-        result?.hasMore &&
-        Number.isFinite(hop) &&
-        hop < CHAINED_CRON_MAX_HOPS
-      ) {
-        await triggerNextBatch(req, hop);
-      }
-
-      return res.status(200).json({
+      // Respond immediately so Vercel doesn't count chain latency against this invocation's timeout.
+      res.status(200).json({
         success: result.success,
         message: result.success
           ? `Distributed ${result.totalPointsDistributed} points to ${result.processed} wallets`
           : 'Distribution failed',
         data: result
       });
+
+      if (
+        CHAINED_CRON_ENABLED &&
+        result?.hasMore &&
+        Number.isFinite(hop) &&
+        hop < CHAINED_CRON_MAX_HOPS
+      ) {
+        triggerNextBatch(req, hop);
+      }
+
+      return;
     } catch (error) {
       console.error('Error distributing points:', error);
       return res.status(500).json({
@@ -199,40 +201,41 @@ export default async (req, res) => {
       }
 
       const normalizedAddress = walletAddress.toLowerCase().trim();
+      const tokenIdStrs = tokenIds.map(id => String(id));
+      const now = new Date();
+
+      const stakeRecords = await Staking.find({
+        walletAddress: normalizedAddress,
+        tokenId: { $in: tokenIdStrs },
+        isActive: true
+      }).select('_id lastClaimAt');
+
       let unstakedPoints = 0;
+      const stakingOps = [];
 
-      for (const tokenId of tokenIds) {
-        const tokenIdStr = String(tokenId);
-        const stakeRecord = await Staking.findOne({
-          walletAddress: normalizedAddress,
-          tokenId: tokenIdStr,
-          isActive: true
+      for (const record of stakeRecords) {
+        const days = (now.getTime() - record.lastClaimAt.getTime()) / 86400000;
+        const pts = Math.floor(days * POINTS_PER_NFT_PER_DAY);
+        if (pts > 0) unstakedPoints += pts;
+
+        stakingOps.push({
+          updateOne: {
+            filter: { _id: record._id },
+            update: { $set: { isActive: false, unstakedAt: now, lastClaimAt: now } }
+          }
         });
+      }
 
-        if (!stakeRecord) {
-          continue;
-        }
-
-        const now = Date.now();
-        const timeElapsedDays = (now - stakeRecord.lastClaimAt.getTime()) / (1000 * 60 * 60 * 24);
-        const pendingPoints = Math.floor(timeElapsedDays * POINTS_PER_NFT_PER_DAY);
-
-        if (pendingPoints > 0) {
-          unstakedPoints += pendingPoints;
-        }
-
-        stakeRecord.isActive = false;
-        stakeRecord.unstakedAt = new Date();
-        await stakeRecord.save();
+      if (stakingOps.length > 0) {
+        await Staking.bulkWrite(stakingOps, { ordered: false });
       }
 
       if (unstakedPoints > 0) {
-        let user = await User.findOne({ walletAddress: normalizedAddress });
-        if (!user) {
-          user = new User({ walletAddress: normalizedAddress, points: 0 });
-        }
-        user.points += unstakedPoints;
-        await user.save();
+        await User.updateOne(
+          { walletAddress: normalizedAddress },
+          { $inc: { points: unstakedPoints } },
+          { upsert: true }
+        );
       }
 
       const { pendingPoints, stakedCount, nextDistribution } = await getPendingPoints(normalizedAddress);
