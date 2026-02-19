@@ -394,6 +394,71 @@ export default async (req, res) => {
     }
   }
 
+  // Route: POST /claim/:walletAddress
+  if (req.method === 'POST' && pathParts[0] === 'claim' && pathParts[1]) {
+    try {
+      const walletAddress = pathParts[1];
+      const normalizedAddress = walletAddress.toLowerCase().trim();
+      const now = new Date();
+
+      const activeStakes = await Staking.find({ walletAddress: normalizedAddress, isActive: true });
+
+      if (activeStakes.length === 0) {
+        return res.status(200).json({
+          success: true,
+          data: { claimedPoints: 0, message: 'No active stakes found' }
+        });
+      }
+
+      let totalPendingPoints = 0;
+      const stakingOps = [];
+
+      for (const stake of activeStakes) {
+        const timeElapsedDays = (now.getTime() - stake.lastClaimAt.getTime()) / (1000 * 60 * 60 * 24);
+        totalPendingPoints += timeElapsedDays * POINTS_PER_NFT_PER_DAY;
+        stakingOps.push({
+          updateOne: {
+            filter: { _id: stake._id },
+            update: { $set: { lastClaimAt: now } }
+          }
+        });
+      }
+
+      const claimedPoints = Math.floor(totalPendingPoints);
+
+      if (claimedPoints > 0) {
+        await Staking.bulkWrite(stakingOps, { ordered: false });
+        await User.updateOne(
+          { walletAddress: normalizedAddress },
+          { $inc: { points: claimedPoints } },
+          { upsert: true }
+        );
+      }
+
+      const { pendingPoints, stakedCount, nextDistribution } = await getPendingPoints(normalizedAddress);
+      const user = await User.findOne({ walletAddress: normalizedAddress });
+      const totalPoints = user ? user.points : 0;
+
+      return res.status(200).json({
+        success: true,
+        data: {
+          claimedPoints,
+          pendingPoints,
+          totalPoints,
+          stakedCount,
+          nextDistribution
+        }
+      });
+    } catch (error) {
+      console.error('Error claiming points:', error);
+      return res.status(500).json({
+        success: false,
+        message: 'Failed to claim points',
+        error: error.message
+      });
+    }
+  }
+
   // Route not found
   return res.status(404).json({
     success: false,
