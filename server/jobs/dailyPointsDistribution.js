@@ -4,6 +4,7 @@ import { Staking } from '../models/Staking.js';
 import { StakingMeta } from '../models/StakingMeta.js';
 
 const POINTS_PER_NFT_PER_DAY = 100;
+const HARD_BUDGET_MS = 45_000; // stop well before Vercel's 60 s wall
 
 // Contract configuration
 const STAKING_ABI = [
@@ -22,33 +23,23 @@ function getStakingContract() {
 }
 
 /**
- * Sync a user's staking state from the blockchain
+ * Sync a user's staking state from the blockchain.
+ * Accepts a pre-created contract instance so callers don't recreate a provider per wallet.
  */
-async function syncUserStaking(walletAddress) {
+async function syncUserStaking(walletAddress, contract) {
   const normalizedAddress = walletAddress.toLowerCase().trim();
-  const { contract } = getStakingContract();
 
   try {
-    // Get staked NFTs from blockchain
     const tokenIds = await contract.stakedTokensOf(normalizedAddress);
     const stakedTokenIds = tokenIds.map(id => id.toString());
 
-    // Get current database state
-    const dbStakedNFTs = await Staking.find({
-      walletAddress: normalizedAddress,
-      isActive: true
-    });
-
+    const dbStakedNFTs = await Staking.find({ walletAddress: normalizedAddress, isActive: true });
     const dbStakedTokenIds = new Set(dbStakedNFTs.map(s => s.tokenId));
     const onChainStakedTokenIds = new Set(stakedTokenIds);
 
-    // Find newly staked NFTs (on-chain but not in DB)
     const newlyStaked = stakedTokenIds.filter(id => !dbStakedTokenIds.has(id));
-
-    // Find unstaked NFTs (in DB but not on-chain)
     const unstaked = Array.from(dbStakedTokenIds).filter(id => !onChainStakedTokenIds.has(id));
 
-    // Add newly staked NFTs
     for (const tokenId of newlyStaked) {
       await Staking.create({
         walletAddress: normalizedAddress,
@@ -57,22 +48,45 @@ async function syncUserStaking(walletAddress) {
         lastClaimAt: new Date(),
         isActive: true
       });
-      console.log(`[Sync] Added staking record for ${normalizedAddress} token ${tokenId}`);
     }
 
-    // Mark unstaked NFTs as inactive
-    for (const tokenId of unstaked) {
-      const stakeRecord = await Staking.findOne({
-        walletAddress: normalizedAddress,
-        tokenId,
-        isActive: true
-      });
+    if (unstaked.length > 0) {
+      const now = new Date();
 
-      if (stakeRecord) {
-        stakeRecord.isActive = false;
-        stakeRecord.unstakedAt = new Date();
-        await stakeRecord.save();
-        console.log(`[Sync] Marked ${normalizedAddress} token ${tokenId} as unstaked`);
+      // Fetch the records we're about to close so we can calculate earned points
+      const stakesToClose = await Staking.find({
+        walletAddress: normalizedAddress,
+        tokenId: { $in: unstaked },
+        isActive: true
+      }).select('_id lastClaimAt');
+
+      let award = 0;
+      const stakingOps = [];
+
+      for (const s of stakesToClose) {
+        const days = (now.getTime() - s.lastClaimAt.getTime()) / 86400000;
+        const pts = Math.floor(days * POINTS_PER_NFT_PER_DAY);
+        if (pts > 0) award += pts;
+
+        stakingOps.push({
+          updateOne: {
+            filter: { _id: s._id },
+            update: { $set: { isActive: false, unstakedAt: now, lastClaimAt: now } }
+          }
+        });
+      }
+
+      if (stakingOps.length > 0) {
+        await Staking.bulkWrite(stakingOps, { ordered: false });
+      }
+
+      if (award > 0) {
+        await User.updateOne(
+          { walletAddress: normalizedAddress },
+          { $inc: { points: award } },
+          { upsert: true }
+        );
+        console.log(`[Sync] Awarded ${award} unstake points to ${normalizedAddress}`);
       }
     }
 
@@ -84,73 +98,90 @@ async function syncUserStaking(walletAddress) {
 }
 
 /**
- * Daily cron job to award points once per day
- * Optional on-chain sync before distributing (see STAKING_SYNC_BEFORE_DISTRIBUTION)
+ * Daily cron job to award points once per day.
+ * Optional on-chain sync before distributing (see STAKING_SYNC_BEFORE_DISTRIBUTION).
  */
 export async function distributeStakingPoints() {
+  const jobStart = Date.now();
   console.log(`[Daily Points] Starting points distribution at ${new Date().toISOString()}`);
 
   try {
-    // Step 1: Get all unique wallet addresses
-    // Check both User collection (anyone who has connected) and Staking records
-    const allUsers = await User.find({}).select('walletAddress');
-    const allStakingRecords = await Staking.find({});
+    // Step 1: Fetch only wallet addresses via distinct — no full document scan.
+    // We only need active stakers for point distribution; include all users so
+    // the cursor covers everyone who has ever connected.
+    const [userWallets, stakingWallets] = await Promise.all([
+      User.distinct('walletAddress'),
+      Staking.distinct('walletAddress', { isActive: true }),
+    ]);
 
     const walletSet = new Set();
-    allUsers.forEach(u => walletSet.add(u.walletAddress));
-    allStakingRecords.forEach(s => walletSet.add(s.walletAddress));
+    for (const w of userWallets) {
+      const n = w?.toLowerCase().trim();
+      if (n) walletSet.add(n);
+    }
+    for (const w of stakingWallets) {
+      const n = w?.toLowerCase().trim();
+      if (n) walletSet.add(n);
+    }
 
-    const uniqueWallets = Array.from(walletSet).filter(Boolean).sort();
+    const uniqueWallets = Array.from(walletSet).sort();
 
-    console.log(`[Daily Points] Found ${uniqueWallets.length} unique wallets to check (${allUsers.length} users, ${new Set(allStakingRecords.map(s => s.walletAddress)).size} with staking history)`);
+    console.log(`[Daily Points] Found ${uniqueWallets.length} unique wallets (${userWallets.length} users, ${stakingWallets.length} active stakers)`);
 
     if (uniqueWallets.length === 0) {
       console.log('[Daily Points] No wallets found');
-      return {
-        success: true,
-        processed: 0,
-        totalPointsDistributed: 0
-      };
+      return { success: true, processed: 0, totalPointsDistributed: 0 };
     }
 
-    // Batch selection with persistent cursor
+    // Step 2: Batch selection with persistent cursor
+    const batchingEnabled =
+      Number.isFinite(MAX_WALLETS_PER_RUN) &&
+      MAX_WALLETS_PER_RUN > 0 &&
+      MAX_WALLETS_PER_RUN < uniqueWallets.length;
+
     let batchStartIndex = 0;
-    if (Number.isFinite(MAX_WALLETS_PER_RUN) && MAX_WALLETS_PER_RUN > 0 && MAX_WALLETS_PER_RUN < uniqueWallets.length) {
+
+    if (batchingEnabled) {
       const cursor = await StakingMeta.findOne({ key: 'daily_points_cursor' });
       batchStartIndex = cursor?.value?.index ?? 0;
-      if (batchStartIndex >= uniqueWallets.length) {
-        batchStartIndex = 0;
-      }
+      if (batchStartIndex >= uniqueWallets.length) batchStartIndex = 0;
     }
 
-    let walletsToProcess = uniqueWallets;
-    let nextCursorIndex = 0;
-    let batchingEnabled = false;
-    if (Number.isFinite(MAX_WALLETS_PER_RUN) && MAX_WALLETS_PER_RUN > 0 && MAX_WALLETS_PER_RUN < uniqueWallets.length) {
-      batchingEnabled = true;
-      walletsToProcess = uniqueWallets.slice(batchStartIndex, batchStartIndex + MAX_WALLETS_PER_RUN);
-      const nextIndex = batchStartIndex + walletsToProcess.length;
-      nextCursorIndex = nextIndex >= uniqueWallets.length ? 0 : nextIndex;
+    const walletsToProcess = batchingEnabled
+      ? uniqueWallets.slice(batchStartIndex, batchStartIndex + MAX_WALLETS_PER_RUN)
+      : uniqueWallets;
+
+    const endIndex = batchStartIndex + walletsToProcess.length;
+    // hasMore is true only if there are un-processed wallets further in the list this cycle
+    const hasMore = batchingEnabled && endIndex < uniqueWallets.length;
+    const nextCursorIndex = hasMore ? endIndex : 0;
+
+    if (batchingEnabled) {
       await StakingMeta.findOneAndUpdate(
         { key: 'daily_points_cursor' },
         { value: { index: nextCursorIndex } },
         { upsert: true, new: true }
       );
-      console.log(`[Daily Points] Processing batch ${batchStartIndex}..${batchStartIndex + walletsToProcess.length - 1} (max ${MAX_WALLETS_PER_RUN})`);
+      console.log(`[Daily Points] Processing batch ${batchStartIndex}..${endIndex - 1} (max ${MAX_WALLETS_PER_RUN})`);
     } else {
       console.log('[Daily Points] Processing all wallets (no batching)');
     }
 
-    // Step 2: Sync each wallet's staking state from blockchain (optional)
+    // Step 3: Optional on-chain sync — one provider/contract for the entire batch
     if (SYNC_ONCHAIN_BEFORE_DISTRIBUTION) {
+      const { contract } = getStakingContract();
       for (const wallet of walletsToProcess) {
-        await syncUserStaking(wallet);
+        if (Date.now() - jobStart > HARD_BUDGET_MS) {
+          console.warn('[Daily Points] Approaching time budget, stopping sync early');
+          break;
+        }
+        await syncUserStaking(wallet, contract);
       }
     } else {
       console.log('[Daily Points] Skipping on-chain sync (STAKING_SYNC_BEFORE_DISTRIBUTION=false)');
     }
 
-    // Step 3: Get all currently active staking records (after sync)
+    // Step 4: Fetch active staking records for this batch only
     const activeStakes = await Staking.find({
       isActive: true,
       walletAddress: { $in: walletsToProcess }
@@ -163,71 +194,75 @@ export async function distributeStakingPoints() {
       return {
         success: true,
         processed: 0,
-        totalPointsDistributed: 0
+        totalPointsDistributed: 0,
+        batching: batchingEnabled,
+        totalWallets: uniqueWallets.length,
+        batchSize: walletsToProcess.length,
+        nextCursorIndex,
+        hasMore,
+        timestamp: new Date().toISOString()
       };
     }
 
-    // Group by wallet address to batch updates
+    // Step 5: Group stakes by wallet
     const walletStakes = new Map();
-
     for (const stake of activeStakes) {
-      const wallet = stake.walletAddress;
-      if (!walletStakes.has(wallet)) {
-        walletStakes.set(wallet, []);
-      }
-      walletStakes.get(wallet).push(stake);
+      if (!walletStakes.has(stake.walletAddress)) walletStakes.set(stake.walletAddress, []);
+      walletStakes.get(stake.walletAddress).push(stake);
     }
 
+    // Step 6: Calculate points and build bulk ops (no per-document round trips)
+    const now = new Date();
+    const nowMs = now.getTime();
+    const stakingBulkOps = [];
+    const walletPointsMap = new Map();
     let totalPointsDistributed = 0;
-    let walletsProcessed = 0;
 
-    // Process each wallet
     for (const [walletAddress, stakes] of walletStakes.entries()) {
-      try {
-        const now = Date.now();
-        let walletPoints = 0;
+      let walletPoints = 0;
 
-        // Calculate points for each staked NFT
-        for (const stake of stakes) {
-          const lastClaimTime = stake.lastClaimAt.getTime();
-          const timeElapsedMs = now - lastClaimTime;
-          const timeElapsedDays = timeElapsedMs / (1000 * 60 * 60 * 24);
-
-          if (timeElapsedDays >= 1) {
-            const points = Math.floor(timeElapsedDays * POINTS_PER_NFT_PER_DAY);
-            walletPoints += points;
-
-            // Update lastClaimAt to now
-            stake.lastClaimAt = new Date();
-            await stake.save();
-          }
+      for (const stake of stakes) {
+        const timeElapsedDays = (nowMs - stake.lastClaimAt.getTime()) / (1000 * 60 * 60 * 24);
+        if (timeElapsedDays >= 1) {
+          walletPoints += Math.floor(timeElapsedDays * POINTS_PER_NFT_PER_DAY);
+          stakingBulkOps.push({
+            updateOne: {
+              filter: { _id: stake._id },
+              update: { $set: { lastClaimAt: now } }
+            }
+          });
         }
+      }
 
-        // Award points to user if any were earned
-        if (walletPoints > 0) {
-          let user = await User.findOne({ walletAddress });
-
-          if (!user) {
-            user = new User({
-              walletAddress,
-              points: 0
-            });
-          }
-
-          user.points += walletPoints;
-          await user.save();
-
-          console.log(`[Daily Points] Awarded ${walletPoints} points to ${walletAddress} (${stakes.length} NFTs staked)`);
-
-          totalPointsDistributed += walletPoints;
-          walletsProcessed++;
-        }
-      } catch (error) {
-        console.error(`[Daily Points] Error processing wallet ${walletAddress}:`, error);
-        // Continue with other wallets
+      if (walletPoints > 0) {
+        walletPointsMap.set(walletAddress, { points: walletPoints, stakedCount: stakes.length });
+        totalPointsDistributed += walletPoints;
       }
     }
 
+    // Step 7: Two bulk writes — one for staking timestamps, one for user points
+    if (stakingBulkOps.length > 0) {
+      await Staking.bulkWrite(stakingBulkOps, { ordered: false });
+    }
+
+    if (walletPointsMap.size > 0) {
+      await User.bulkWrite(
+        Array.from(walletPointsMap.entries()).map(([walletAddress, { points }]) => ({
+          updateOne: {
+            filter: { walletAddress },
+            update: { $inc: { points } },
+            upsert: true
+          }
+        })),
+        { ordered: false }
+      );
+
+      for (const [walletAddress, { points, stakedCount }] of walletPointsMap.entries()) {
+        console.log(`[Daily Points] Awarded ${points} points to ${walletAddress} (${stakedCount} NFTs staked)`);
+      }
+    }
+
+    const walletsProcessed = walletPointsMap.size;
     console.log(`[Daily Points] Completed: ${walletsProcessed} wallets processed, ${totalPointsDistributed} total points distributed`);
 
     return {
@@ -238,7 +273,7 @@ export async function distributeStakingPoints() {
       totalWallets: uniqueWallets.length,
       batchSize: walletsToProcess.length,
       nextCursorIndex,
-      hasMore: batchingEnabled && nextCursorIndex !== 0,
+      hasMore,
       timestamp: new Date().toISOString()
     };
   } catch (error) {
@@ -252,34 +287,23 @@ export async function distributeStakingPoints() {
 }
 
 /**
- * Get pending points for a wallet (for display purposes only)
- * Points are not claimed, just calculated
+ * Get pending points for a wallet (display only — does not claim).
  */
 export async function getPendingPoints(walletAddress) {
   const normalizedAddress = walletAddress.toLowerCase().trim();
 
-  const activeStakes = await Staking.find({
-    walletAddress: normalizedAddress,
-    isActive: true
-  });
+  const activeStakes = await Staking.find({ walletAddress: normalizedAddress, isActive: true });
 
   if (activeStakes.length === 0) {
-    return {
-      pendingPoints: 0,
-      stakedCount: 0,
-      nextDistribution: getNextDistributionTime()
-    };
+    return { pendingPoints: 0, stakedCount: 0, nextDistribution: getNextDistributionTime() };
   }
 
   const now = Date.now();
   let totalPendingPoints = 0;
 
   for (const stake of activeStakes) {
-    const lastClaimTime = stake.lastClaimAt.getTime();
-    const timeElapsedMs = now - lastClaimTime;
-    const timeElapsedDays = timeElapsedMs / (1000 * 60 * 60 * 24);
-    const points = timeElapsedDays * POINTS_PER_NFT_PER_DAY;
-    totalPendingPoints += points;
+    const timeElapsedDays = (now - stake.lastClaimAt.getTime()) / (1000 * 60 * 60 * 24);
+    totalPendingPoints += timeElapsedDays * POINTS_PER_NFT_PER_DAY;
   }
 
   return {
@@ -289,15 +313,11 @@ export async function getPendingPoints(walletAddress) {
   };
 }
 
-/**
- * Calculate when the next daily distribution will occur
- */
 function getNextDistributionTime() {
   const now = new Date();
   const next = new Date(now);
   next.setUTCHours(0, 0, 0, 0);
   next.setDate(next.getDate() + 1);
-
   return {
     timestamp: next.toISOString(),
     hoursRemaining: Math.ceil((next.getTime() - now.getTime()) / (1000 * 60 * 60))
