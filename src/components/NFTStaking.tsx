@@ -58,6 +58,7 @@ export const NFTStaking = ({ connectedWallet, connectedWalletName, walletProvide
   const [loading, setLoading] = useState(true);
   const [staking, setStaking] = useState(false);
   const [unstaking, setUnstaking] = useState(false);
+  const [claiming, setClaiming] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const { toast } = useToast();
 
@@ -290,6 +291,41 @@ export const NFTStaking = ({ connectedWallet, connectedWalletName, walletProvide
       }
     } catch (error) {
       console.error('Error fetching staking points:', error);
+    }
+  };
+
+  // Claim pending points manually
+  const handleClaim = async () => {
+    if (!connectedWallet || claiming || pendingPoints <= 0) return;
+    setClaiming(true);
+    try {
+      const response = await fetch(`${API_URL}/api/staking/claim/${connectedWallet}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+      });
+      const data = await response.json();
+      if (data.success) {
+        setUserPoints(data.data.totalPoints || 0);
+        setPendingPoints(data.data.pendingPoints || 0);
+        toast({
+          title: "Points Claimed!",
+          description: `+${data.data.claimedPoints} points added to your total.`,
+        });
+      } else {
+        toast({
+          title: "Claim Failed",
+          description: data.message || "Failed to claim points.",
+          variant: "destructive",
+        });
+      }
+    } catch (error) {
+      toast({
+        title: "Claim Failed",
+        description: "An error occurred while claiming points.",
+        variant: "destructive",
+      });
+    } finally {
+      setClaiming(false);
     }
   };
 
@@ -674,9 +710,18 @@ export const NFTStaking = ({ connectedWallet, connectedWalletName, walletProvide
                 Auto-awarded daily
               </p>
             </div>
-            <p className="text-lg sm:text-xl font-pixel text-orange-600 font-bold">
-              +{pendingPoints} points
-            </p>
+            <div className="flex items-center justify-between gap-2">
+              <p className="text-lg sm:text-xl font-pixel text-orange-600 font-bold">
+                +{pendingPoints} points
+              </p>
+              <button
+                onClick={handleClaim}
+                disabled={claiming}
+                className="win98-border px-2 py-0.5 text-xs font-pixel bg-orange-500 text-white hover:bg-orange-600 disabled:opacity-50 whitespace-nowrap"
+              >
+                {claiming ? "Claiming..." : "Claim Now"}
+              </button>
+            </div>
             <p className="text-[9px] sm:text-[10px] font-retro text-gray-600">
               Will be added to your total automatically
             </p>
